@@ -21,6 +21,9 @@ class Bests:
   def update(self, sigs, bkgs, nons):
     signifs = []
     totSignifSq = 0.
+    # Calculate sig for each category
+    # From this,compute total sig squared i.e. sig squared for each category, summed up
+    # Then square root at the end to get final total Sig for that single BIN
     for i in range(self.nCats):
       sig = sigs[i] 
       bkg = bkgs[i] 
@@ -31,6 +34,7 @@ class Bests:
       signifs.append(signif)
       totSignifSq += signif*signif
     totSignif = np.sqrt( totSignifSq )
+    # If this TotalSignif is greater than previous Totalsignif, update Totalsignif, and the signal,bg cat counts
     if totSignif > self.totSignif:
       self.totSignif = totSignif
       for i in range(self.nCats):
@@ -106,10 +110,13 @@ class CatOptim:
     self.lows           = od()
     self.highs          = od()
     self.boundaries     = od()
+    # populate dictionary with (key:name, value=number)
+    #initialise dicts
     for iName,name in enumerate(self.names):
-      self.sigDiscrims[ name ] = sigDiscrims[iName]
+      self.sigDiscrims[ name ] = sigDiscrims[iName] #NB RHS is a value e.g. sigDiscrims[0] = 0.5
       self.bkgDiscrims[ name ] = bkgDiscrims[iName]
       assert len(ranges[iName]) == 2
+      #ranges is a list of lists i.e. [ [low,high], [low2,high2],... ]
       self.lows[ name ]       = ranges[iName][0]
       self.highs[ name ]      = ranges[iName][1]
       self.boundaries[ name ] = [-999. for i in range(self.nCats)]
@@ -133,6 +140,9 @@ class CatOptim:
     '''Run the optimisation for a given number of iterations'''
     for iIter in range(nIters):
       cuts = od()
+      # chose random values between the low and high ranges given, for each name.
+      # Usually name=diphoBDT (score) only.
+      # Syntax is: .unform(lowestNo, HighestNo, HowManyNumers)
       for iName,name in enumerate(self.names):
         tempCuts = np.random.uniform(self.lows[name], self.highs[name], self.nCats)
         if iName==0 or self.sortOthers:
@@ -143,8 +153,8 @@ class CatOptim:
       sigs = []
       bkgs = []
       nons = []
-      for iCat in range(self.nCats):
-        lastCat = (iCat+1 == self.nCats)
+      for iCat in range(self.nCats): #number of sub-cats we are splitting the cat into
+        lastCat = (iCat+1 == self.nCats) #boolean, set to true if on last cat
         sigWeights = self.sigWeights
         bkgWeights = self.bkgWeights
         if self.addNonSig: nonSigWeights = self.nonSigWeights
@@ -212,7 +222,7 @@ class CatOptim:
             sigWidth = self.getRealSigma(sigHist)
             bkgHist = r.TH1F('bkgHistTemp','bkgHistTemp',160,100,180)
             fill_hist(bkgHist, self.bkgMass, weights=bkgWeights)
-            bkgCount = self.computeBkg(bkgHist, sigWidth)
+            bkgCount = self.computeBkg(bkgHist, sigWidth) #fits exp to BG integrates between 125+/-sigma 
             if self.addNonSig:
               nonSigHist = r.TH1F('nonSigHistTemp','nonSigHistTemp',160,100,180)
               fill_hist(nonSigHist, self.nonSigMass, weights=nonSigWeights)

@@ -120,19 +120,66 @@ print 'bkgSumW %.6f'%bkgSumW
 print 'ratio %.6f'%(sigSumW/bkgSumW)
 #exit('first just count the weights')
 
+#print(trainTotal['diphoWeight'].head(20))
+#print(trainTotal['altDiphoWeight'].head(20))
+#print(trainTotal['weight'].head(20))
+
 #define the indices shuffle (useful to keep this separate so it can be re-used)
 theShape = trainTotal.shape[0]
 diphoShuffle = np.random.permutation(theShape)
 diphoTrainLimit = int(theShape*trainFrac)
 diphoValidLimit = int(theShape*(trainFrac+validFrac))
 
-#setup the various datasets for diphoton training
+#setup the various datasets for diphoton training (as numpy arrays)
 diphoX  = trainTotal[diphoVars].values
 diphoY  = trainTotal['truthDipho'].values
-diphoTW = trainTotal['diphoWeight'].values
-diphoAW = trainTotal['altDiphoWeight'].values
-diphoFW = trainTotal['weight'].values
+diphoTW = trainTotal['diphoWeight'].values #weights for training sample
+diphoAW = trainTotal['altDiphoWeight'].values #alternative weights for training sample
+diphoFW = trainTotal['weight'].values #weights for test sample
 diphoM  = trainTotal['CMS_hgg_mass'].values
+
+#setup the pandas datasets for the CV grid search
+modTrainTotal = trainTotal
+modWeights = (trainTotal['diphoWeight']*10).round().astype(int)
+
+
+
+#Debugging#
+print('The shape of modWeights (column) is:')
+print(modWeights.shape)
+print('The shape of modTrainTotal design matrix is:')
+print(modTrainTotal.shape)
+print('The first few modWeights entries are:')
+print(modWeights.head())
+print('The first few modTrainTotal entries are:')
+print(modTrainTotal.head())
+
+print('modTrainTotal.iloc[0] is:')
+print(modTrainTotal.iloc[0,:])
+
+print('modWeights.iloc[0] is:')
+print(modWeights.iloc[0]) 
+
+#try printing out the data types for the row and for the design matrix to see if one is a numpy array and one is a pandas series, and so incompatible.
+print('modTrainTotal is of data type:')
+print(type(modTrainTotal))
+
+print('modWeights is of data type:')
+print(type(modWeights))
+# End of debugging #
+
+print('The number of rows before augmentation was: %i'%(trainTotal.shape[0]))
+
+print('About to append to training matrix...')
+#Append the column x times, where x is the weight (scaled to an integer)
+for i in range(trainTotal.shape[0]):  
+  if(modWeights.iloc[i] !=0):
+    if(i%100 == 0): print'Done next 100 events'
+    modTrainTotal = modTrainTotal.append([modTrainTotal.iloc[i,:]]*modWeights.iloc[i],ignore_index=True)
+
+print('Appending finished')
+print('The number of rows after augmentation is: %i' %(modTrainTotal.shape[0]))
+
 del trainTotal
 
 diphoX  = diphoX[diphoShuffle]
@@ -158,13 +205,15 @@ trainParams['nthread'] = 1
 paramExt = ''
 if opts.trainParams:
   paramExt = '__'
-  for pair in opts.trainParams:
-    key  = pair.split(':')[0]
-    data = pair.split(':')[1]
-    trainParams[key] = data
-    paramExt += '%s_%s__'%(key,data)
-  paramExt = paramExt[:-2]
-print 'about to train diphoton BDT'
+  for params in opts.trainParams:
+    pairs  = params.split(',')
+    for pairs in pairs:
+      key = pairs.split(':')[0]
+      data = pairs.split(':')[1]
+      trainParams[key] = data
+      paramExt += '%s_%s__'%(key,data)
+    paramExt = paramExt[:-2] 
+print 'about to train diphoton BDT with hyperparameters:%s'%(trainParams)
 diphoModel = xg.train(trainParams, trainingDipho)
 print 'done'
 
@@ -177,7 +226,7 @@ print 'saved as %s/diphoModel%s.model'%(modelDir,paramExt)
 
 #build same thing but with equalised weights
 altTrainingDipho = xg.DMatrix(diphoTrainX, label=diphoTrainY, weight=diphoTrainAW, feature_names=diphoVars)
-print 'about to train alternative diphoton BDT'
+print 'about to train alternative diphoton BDT with hyperparameters:%s'%(trainParams)
 altDiphoModel = xg.train(trainParams, altTrainingDipho)
 print 'done'
 
@@ -201,7 +250,7 @@ print 'area under roc curve for test set     = %1.3f'%( roc_auc_score(diphoTestY
 #exit("Plotting not working for now so exit")
 #make some plots 
 plotDir = trainDir.replace('trees','plots')
-plotDir = '%s/%s'%paramExt
+plotDir = '%s/%s'% (plotDir,paramExt)
 if not path.isdir(plotDir): 
   system('mkdir -p %s'%plotDir)
 bkgEff, sigEff, nada = roc_curve(diphoTestY, diphoPredY, sample_weight=diphoTestFW)

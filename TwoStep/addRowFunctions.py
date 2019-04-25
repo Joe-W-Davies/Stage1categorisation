@@ -5,9 +5,52 @@ def truthDipho(row):
     if not row['stage1cat']==0: return 1
     else: return 0
 
-def truthClass(row):
-    if not row['stage1cat']==0: return int(row['stage1cat']-3)
-    else: return 0
+
+def truthClass(row): 
+    # Previous Stage 1 definitions
+    #if not row['stage1cat']==0: return int(row['stage1cat']-3) 
+    #else: return 0
+
+    #Stage1.1 definitions
+    # NB dont need a > 0 cut on thing lkike Hjj because if we have two jets, this is non zero
+  if(row['gen_pTH'] < 200):
+    if(row['n_gen_jets'] == 0):
+      if(row['gen_pTH'] < 10): return 0
+      else: return 1
+    if(row['n_gen_jets'] == 1): 
+      if(row['gen_pTH'] < 60): return 2
+      elif(row['gen_pTH'] < 120): return 3
+      elif(row['gen_pTH'] < 200): return 4 
+    if(row['n_gen_jets'] >= 2): 
+      if(row['gen_dijet_Mjj'] < 350):
+        if(row['gen_pTH'] < 60): return 5 
+          #if(ev.gen_ptHjj > 0 and ev.gen_ptHjj < 25): return 6
+          #if(ev.gen_ptHjj > 25): return 7
+        elif(row['gen_pTH'] < 120): return 6
+          #if(ev.gen_ptHjj > 0 and ev.gen_ptHjj < 25): return 8
+          #if(ev.gen_ptHjj > 25): return 9
+        elif(row['gen_pTH'] < 200): return 7
+          #if(ev.gen_ptHjj > 0 and ev.gen_ptHjj < 25): return 10
+          #if(ev.gen_ptHjj > 25): return 11
+      else: #( implicit if Mjj>350)
+        if(row['gen_ptHjj'] < 25): 
+          if(row['gen_dijet_Mjj'] < 700): return 9
+          else: return 10
+        else:
+          if(row['gen_dijet_Mjj'] < 700): return 11
+          else: return 12
+        #if(ev.gen_ptHjj > 0 and ev.gen_ptHjj < 25):
+          #if(ev.gen_dijet_Mjj < 700): return 12
+          #if(ev.gen_dijet_Mjj > 700 and ev.gen_dijet_Mjj < 1000): return 13
+          #if(ev.gen_dijet_Mjj > 1000 and ev.gen_dijet_Mjj < 1500): return 14
+          #if(ev.gen_dijet_Mjj > 1500): return 15
+        #if(ev.gen_ptHjj > 25):
+          #if(ev.gen_dijet_Mjj < 700): return 16
+          #if(ev.gen_dijet_Mjj > 700 and ev.gen_dijet_Mjj < 1000): return 17
+          #if(ev.gen_dijet_Mjj > 1000 and ev.gen_dijet_Mjj < 1500): return 18
+          #if(ev.gen_dijet_Mjj > 1500): return 19 
+  elif(row['gen_pTH']>200): return 8
+  else: return -1 #everything that doesn't go into a bin
 
 def truthJets(row):
     if row['stage1cat']==3: return 0
@@ -15,18 +58,58 @@ def truthJets(row):
     elif row['stage1cat']>=8 and row['stage1cat']<=11: return 2
     else: return -1
 
-def reco(row):
-    if row['n_rec_jets']==0: return 0
-    elif row['n_rec_jets']==1:
-        if row['diphopt'] < 60: return 1
-        elif row['diphopt'] < 120: return 2
-        elif row['diphopt'] < 200: return 3
-        else: return 4
-    else:
-        if row['diphopt'] < 60: return 5
-        elif row['diphopt'] < 120: return 6
-        elif row['diphopt'] < 200: return 7
-        else: return 8
+def reco(row): 
+   #if row['n_rec_jets']==0: return 0
+   #elif row['n_rec_jets']==1:
+   #    if row['diphopt'] < 60: return 1
+   #    elif row['diphopt'] < 120: return 2
+   #    elif row['diphopt'] < 200: return 3
+   #    else: return 4
+   #else: # i.e. for jets and above
+   #    if row['diphopt'] < 60: return 5
+   #    elif row['diphopt'] < 120: return 6 #elif means below 120 but not below 60, so gets correct region
+   #    elif row['diphopt'] < 200: return 7
+   #    else: return 8
+
+    #Stage1.1 reco/cat definitions
+  if(row['diphopt'] < 200):
+    if(row['n_rec_jets'] == 0):
+      if(row['diphopt'] < 10): return 0
+      else: return 1
+    if(row['n_rec_jets'] == 1): 
+      if(row['diphopt'] < 60): return 2
+      elif(row['diphopt'] < 120): return 3
+      elif(row['diphopt'] < 200): return 4 
+    if(row['n_rec_jets'] >= 2): 
+      if(row['dijet_Mjj'] < 350):
+        if(row['diphopt'] < 60): return 5 
+          #if(ev.gen_ptHjj > 0 and ev.gen_ptHjj < 25): return 6
+          #if(ev.gen_ptHjj > 25): return 7
+        elif(row['diphopt'] < 120): return 6
+          #if(ev.gen_ptHjj > 0 and ev.gen_ptHjj < 25): return 8
+          #if(ev.gen_ptHjj > 25): return 9
+        elif(row['diphopt'] < 200): return 7
+          #if(ev.gen_ptHjj > 0 and ev.gen_ptHjj < 25): return 10
+          #if(ev.gen_ptHjj > 25): return 11
+      else: #( implicit if Mjj>350)
+        if(row['ptHjj'] < 25):
+          if(row['dijet_Mjj'] < 700): return 9
+          else: return 10
+        else: #(implicit if PtHjj > 25)
+          if(row['dijet_Mjj'] < 700): return 11
+          else: return 12
+        #if(ev.gen_ptHjj > 0 and ev.gen_ptHjj < 25):
+          #if(ev.gen_dijet_Mjj < 700): return 12
+          #if(ev.gen_dijet_Mjj > 700 and ev.gen_dijet_Mjj < 1000): return 13
+          #if(ev.gen_dijet_Mjj > 1000 and ev.gen_dijet_Mjj < 1500): return 14
+          #if(ev.gen_dijet_Mjj > 1500): return 15
+        #if(ev.gen_ptHjj > 25):
+          #if(ev.gen_dijet_Mjj < 700): return 16
+          #if(ev.gen_dijet_Mjj > 700 and ev.gen_dijet_Mjj < 1000): return 17
+          #if(ev.gen_dijet_Mjj > 1000 and ev.gen_dijet_Mjj < 1500): return 18
+          #if(ev.gen_dijet_Mjj > 1500): return 19 
+  elif(row['diphopt']>200): return 8
+  else: return -1 #everything that doesn't go into a bin
 
 def diphoWeight(row, sigWeight=1.):
     weight = row['weight']

@@ -41,14 +41,15 @@ def jetPtToClass( jets, pt ):
 
 
 def submitJob( jobDir, theCmd, params=None, model=None, dryRun=False ):
-  outName = '%s/sub__'%jobDir
-  if model:
-    outName += model.replace('.model','')
+  outName = '%s/sub__'%jobDir # file path up to the "sub" part
+  if model: 
+    outName += model.replace('.model','') 
   elif params: 
     params = params.split(',')
     for pair in params:
       pair = pair.split(':')
-      outName += '%s_%s__'%(pair[0],pair[1])
+      outName += '%s_%s__'%(pair[0],pair[1]) 
+      #outName += '%s_'%(pair[0]) # append only the hyper param, NOT its value to file and hope it prints in 1 file
     outName = outName[:-2]
   else:
     outName += 'None'
@@ -63,8 +64,10 @@ def submitJob( jobDir, theCmd, params=None, model=None, dryRun=False ):
         elif '!NAME!' in line:
           line = line.replace('!NAME!',outName.replace('.sh',''))
         outFile.write(line)
-  subCmd = 'qsub -q hep.q -o %s -e %s -l h_vmem=24G %s' %(outName.replace('.sh','.log'), outName.replace('.sh','.err'), outName) 
-  print
+  subCmd = 'qsub -q hep.q -o %s -e %s -l h_vmem=4G -l h_rt=6:0:0 %s' %(outName.replace('.sh','.log'), outName.replace('.sh','.err'), outName) 
+  # NOTE: previous command below
+  #subCmd = 'qsub -q hep.q -o %s -e %s -l h_vmem=24G %s' %(outName.replace('.sh','.log'), outName.replace('.sh','.err'), outName) 
+  print #to run over 4 cores, put: -pe hep.pe 4, before the -l option 
   print subCmd
   if not dryRun:
     os.system(subCmd)

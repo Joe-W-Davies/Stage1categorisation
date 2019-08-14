@@ -36,8 +36,10 @@ def computeBkg( hist, effSigma ):
         bkgVal = fit.Integral(125. - effSigma, 125. + effSigma)
     return bkgVal
 
-def jetPtToClass( jets, pt ):
-  return ( (jets>0).astype(int) + (4*((jets>1).astype(int))) + ((jets>0)*(pt>60.)).astype(int) + ((jets>0)*(pt>120.)).astype(int) + ((jets>0)*(pt>200.)).astype(int) )
+#NOTE: moved the below function to AddRowFunctions.py
+#def jetPtToClass(jets, pt, Mjj, PtHjj): 
+  #Choose class based on the BDT predcited # of jets, and the photon pt 
+  #return ( (jets>0).astype(int) + (4*((jets>1).astype(int))) + ((jets>0)*(pt>60.)).astype(int) + ((jets>0)*(pt>120.)).astype(int) + ((jets>0)*(pt>200.)).astype(int) )
 
 
 def submitJob( jobDir, theCmd, params=None, model=None, dryRun=False ):
@@ -64,7 +66,7 @@ def submitJob( jobDir, theCmd, params=None, model=None, dryRun=False ):
         elif '!NAME!' in line:
           line = line.replace('!NAME!',outName.replace('.sh',''))
         outFile.write(line)
-  subCmd = 'qsub -q hep.q -o %s -e %s -l h_vmem=4G -l h_rt=6:0:0 %s' %(outName.replace('.sh','.log'), outName.replace('.sh','.err'), outName) 
+  subCmd = 'qsub -q hep.q -o %s -e %s -l h_vmem=24G %s' %(outName.replace('.sh','.log'), outName.replace('.sh','.err'), outName) 
   # NOTE: previous command below
   #subCmd = 'qsub -q hep.q -o %s -e %s -l h_vmem=24G %s' %(outName.replace('.sh','.log'), outName.replace('.sh','.err'), outName) 
   print #to run over 4 cores, put: -pe hep.pe 4, before the -l option 

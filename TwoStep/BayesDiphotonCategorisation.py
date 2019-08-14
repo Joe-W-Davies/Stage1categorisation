@@ -8,7 +8,10 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import pickle
 from sklearn.metrics import roc_auc_score, roc_curve
+from skopt import BayesSearchCV
+from sklearn.model_selection import KFold, StratifiedKFold
 from os import path, system
+
 
 from addRowFunctions import addPt, truthDipho, reco, diphoWeight, altDiphoWeight
 from otherHelpers import prettyHist, getAMS, computeBkg, getRealSigma
@@ -31,7 +34,7 @@ if trainDir.endswith('/'): trainDir = trainDir[:-1]
 frameDir = trainDir.replace('trees','frames')
 if opts.trainParams: opts.trainParams = opts.trainParams.split(',')
 trainFrac = 0.7
-#validFrac = 0.1 #NOTE: we don't do the validation, so test on 30% of data 
+validFrac = 0.1
 
 #get trees from files, put them in data frames
 #procFileMap = {'ggh':'ggH.root', 'vbf':'VBF.root', 'tth':'ttH.root', 'wzh':'VH.root', 'dipho':'Dipho.root', 'gjet':'GJet.root', 'qcd':'QCD.root'}
@@ -101,6 +104,8 @@ if not opts.dataFrame:
   trainTotal['diphoWeight'] = trainTotal.apply(diphoWeight,axis=1)
   trainTotal['altDiphoWeight'] = trainTotal.apply(altDiphoWeight, axis=1)
   print 'all columns added'
+  print 'First 5 rows of train total dataframe:'
+  print(trainTotal.head())
 
   #save as a pickle file
   if not path.isdir(frameDir): 
@@ -120,65 +125,20 @@ print 'bkgSumW %.6f'%bkgSumW
 print 'ratio %.6f'%(sigSumW/bkgSumW)
 #exit('first just count the weights')
 
-#print(trainTotal['diphoWeight'].head(20))
-#print(trainTotal['altDiphoWeight'].head(20))
-#print(trainTotal['weight'].head(20))
-
 #define the indices shuffle (useful to keep this separate so it can be re-used)
+trainTotal = trainTotal.sample(n=trainTotal.shape[0], weights='diphoWeight', random_state=1)
 theShape = trainTotal.shape[0]
 diphoShuffle = np.random.permutation(theShape)
 diphoTrainLimit = int(theShape*trainFrac)
-#diphoValidLimit = int(theShape*(trainFrac+validFrac))
+diphoValidLimit = int(theShape*(trainFrac+validFrac))
 
-#setup the various datasets for diphoton training (as numpy arrays)
+#setup the various datasets for diphoton training as numpy arrays
 diphoX  = trainTotal[diphoVars].values
 diphoY  = trainTotal['truthDipho'].values
-diphoTW = trainTotal['diphoWeight'].values #weights for training sample
-diphoAW = trainTotal['altDiphoWeight'].values #alternative weights for training sample
-diphoFW = trainTotal['weight'].values #weights for test sample
+diphoTW = trainTotal['diphoWeight'].values
+diphoAW = trainTotal['altDiphoWeight'].values
+diphoFW = trainTotal['weight'].values
 diphoM  = trainTotal['CMS_hgg_mass'].values
-
-#setup the pandas datasets for the CV grid search
-#modTrainTotal = trainTotal
-#modWeights = (trainTotal['diphoWeight']*10).round().astype(int)
-
-
-
-#Debugging#
-#print('The shape of modWeights (column) is:')
-#print(modWeights.shape)
-#print('The shape of modTrainTotal design matrix is:')
-#print(modTrainTotal.shape)
-#print('The first few modWeights entries are:')
-#print(modWeights.head())
-#print('The first few modTrainTotal entries are:')
-#print(modTrainTotal.head())
-
-#print('modTrainTotal.iloc[0] is:')
-#print(modTrainTotal.iloc[0,:])
-
-#print('modWeights.iloc[0] is:')
-#print(modWeights.iloc[0]) 
-
-#try printing out the data types for the row and for the design matrix to see if one is a numpy array and one is a pandas series, and so incompatible.
-#print('modTrainTotal is of data type:')
-#print(type(modTrainTotal))
-
-#print('modWeights is of data type:')
-#print(type(modWeights))
-# End of debugging #
-
-#print('The number of rows before augmentation was: %i'%(trainTotal.shape[0]))
-
-#print('About to append to training matrix...')
-#Append the column x times, where x is the weight (scaled to an integer)
-#for i in range(trainTotal.shape[0]):  
-  #if(modWeights.iloc[i] !=0):
-    #if(i%100 == 0): print'Done next 100 events'
-    #modTrainTotal = modTrainTotal.append([modTrainTotal.iloc[i,:]]*modWeights.iloc[i],ignore_index=True)
-
-#print('Appending finished')
-#print('The number of rows after augmentation is: %i' %(modTrainTotal.shape[0]))
 
 del trainTotal
 
@@ -189,31 +149,115 @@ diphoAW = diphoAW[diphoShuffle]
 diphoFW = diphoFW[diphoShuffle]
 diphoM  = diphoM[diphoShuffle]
 
-diphoTrainX, diphoTestX  = np.split( diphoX,  [diphoTrainLimit] )
-diphoTrainY, diphoTestY  = np.split( diphoY,  [diphoTrainLimit] )
-diphoTrainTW, diphoTestTW = np.split( diphoTW, [diphoTrainLimit] )
-diphoTrainAW, diphoTestAW = np.split( diphoAW, [diphoTrainLimit] )
-diphoTrainFW, diphoTestFW = np.split( diphoFW, [diphoTrainLimit] )
-diphoTrainM, diphoTestM  = np.split( diphoM,  [diphoTrainLimit] )
+diphoTrainX,  diphoValidX,  diphoTestX  = np.split( diphoX,  [diphoTrainLimit,diphoValidLimit] )
+diphoTrainY,  diphoValidY,  diphoTestY  = np.split( diphoY,  [diphoTrainLimit,diphoValidLimit] )
+diphoTrainTW, diphoValidTW, diphoTestTW = np.split( diphoTW, [diphoTrainLimit,diphoValidLimit] )
+diphoTrainAW, diphoValidAW, diphoTestAW = np.split( diphoAW, [diphoTrainLimit,diphoValidLimit] )
+diphoTrainFW, diphoValidFW, diphoTestFW = np.split( diphoFW, [diphoTrainLimit,diphoValidLimit] )
+diphoTrainM,  diphoValidM,  diphoTestM  = np.split( diphoM,  [diphoTrainLimit,diphoValidLimit] )
 
-#build the background discrimination BDT
-trainingDipho = xg.DMatrix(diphoTrainX, label=diphoTrainY, weight=diphoTrainTW, feature_names=diphoVars)
-testingDipho  = xg.DMatrix(diphoTestX,  label=diphoTestY,  weight=diphoTestFW,  feature_names=diphoVars)
-trainParams = {}
-trainParams['objective'] = 'binary:logistic'
-trainParams['nthread'] = 1
-paramExt = ''
-if opts.trainParams:
-  paramExt = '__'
-  for params in opts.trainParams:
-    pairs  = params.split(',')
-    for pairs in pairs:
-      key = pairs.split(':')[0]
-      data = pairs.split(':')[1]
-      trainParams[key] = data
-      paramExt += '%s_%s__'%(key,data)
-    paramExt = paramExt[:-2] 
-print 'about to train diphoton BDT with hyperparameters:%s'%(trainParams)
+
+#build the background discrimination BDT using DMatrix objects
+#trainingDipho = xg.DMatrix(diphoTrainX, label=diphoTrainY, weight=diphoTrainTW, feature_names=diphoVars)
+#testingDipho  = xg.DMatrix(diphoTestX,  label=diphoTestY,  weight=diphoTestFW,  feature_names=diphoVars)
+#trainParams = {}
+#trainParams['objective'] = 'binary:logistic'
+#trainParams['nthread'] = 1
+#paramExt = ''
+
+
+#if opts.trainParams:
+#  paramExt = '__'
+#  for pair in opts.trainParams:
+#    key  = pair.split(':')[0]
+#    data = pair.split(':')[1]
+#    trainParams[key] = data
+#    paramExt += '%s_%s__'%(key,data)
+#  paramExt = paramExt[:-2]
+                                        #### BAYESIAN OPTIMISATION ####
+# Do this first as will probably break...
+print('Moving into Bayesian optimisation')
+
+# Build classifer
+bayes_cv_tuner = BayesSearchCV(
+    estimator = xg.XGBClassifier(
+        n_jobs = 1,
+        objective = 'binary:logistic',
+        eval_metric = 'auc',
+        silent=1,
+        tree_method='approx',
+        nthread = 1
+    ),
+    search_spaces = {
+        #'learning_rate': (0.01, 1.0, 'log-uniform'),
+        #'min_child_weight': (0, 10),
+        'max_depth': (0, 50),
+        'max_delta_step': (0, 20)#,
+        #'subsample': (0.01, 1.0, 'uniform'),
+        #'colsample_bytree': (0.01, 1.0, 'uniform'),
+        #'colsample_bylevel': (0.01, 1.0, 'uniform'),
+        #'reg_lambda': (1e-9, 1000, 'log-uniform'),
+        #'reg_alpha': (1e-9, 1.0, 'log-uniform'),
+        #'gamma': (1e-9, 0.5, 'log-uniform'),
+        #'min_child_weight': (0, 5),
+        #'n_estimators': (50, 100),
+        #'scale_pos_weight': (1e-6, 500, 'log-uniform')
+    },    
+    scoring = 'accuracy',
+    cv = StratifiedKFold(
+        n_splits=3,
+        shuffle=True,
+        random_state=42
+    ),
+    n_jobs = 1,
+    n_iter = 2,   
+    verbose = 0,
+    refit = True,
+    random_state = 42
+)
+
+def printStatus(optim_result):
+    """Status callback durring bayesian hyperparameter search"""
+    
+    #Get all the models tested so far in DataFrame format
+    all_models = pd.DataFrame(bayes_cv_tuner.cv_results_)    
+    
+    # Get current parameters and the best parameters    
+    best_params = pd.Series(bayes_cv_tuner.best_params_)
+    print('Model #{}\nBest ROC-AUC: {}\nBest params: {}\n'.format(
+        len(all_models),
+        np.round(bayes_cv_tuner.best_score_, 4),
+        bayes_cv_tuner.best_params_
+    ))
+
+
+
+result = bayes_cv_tuner.fit(diphoTrainX, diphoTrainY, callback=printStatus)
+print("Model successfully fit")
+
+#save all results to csv file (as a check)
+#clf_name = bayes_cv_tuner.estimator.__class__.__name__
+#all_models.to_csv(clf_name+"_cv_results.csv")
+
+
+#Check the performance using old synta (not optim result)
+#BestBoost = bayes_cv_tuner.best_estimator_
+#BayesPredYxcheck = BestBoost.predict(trainingDipho)
+#BayesPredY = BestBoost.predict(testingDipho)
+#print ' Best perforamance of optimised model:'
+#print 'area under roc curve for training set = %1.3f'%( roc_auc_score(diphoTrainY, BayesPredYxcheck, sample_weight=diphoTrainFW) )
+#print 'area under roc curve for test set     = %1.3f'%( roc_auc_score(diphoTestY, BayesPredY, sample_weight=diphoTestFW) )
+#check whether the score calculated with just bayes_cv_tuner with no weights is the same as the above:
+#print('Is this the same as %s? If not, weights matter and use old syntax' (%np.round(bayes_cv_tuner.best_score_,4)
+
+#Save the best model
+#BestBoost.save_model('%s/BestBoost.model'%(modelDir))
+
+print('Bayesian optimisation complete')
+
+                           #### Train the original moedls with no opt of hyperparams ####
+'''
+print 'about to train diphoton BDT'
 diphoModel = xg.train(trainParams, trainingDipho)
 print 'done'
 
@@ -226,7 +270,7 @@ print 'saved as %s/diphoModel%s.model'%(modelDir,paramExt)
 
 #build same thing but with equalised weights
 altTrainingDipho = xg.DMatrix(diphoTrainX, label=diphoTrainY, weight=diphoTrainAW, feature_names=diphoVars)
-print 'about to train alternative diphoton BDT with hyperparameters:%s'%(trainParams)
+print 'about to train alternative diphoton BDT'
 altDiphoModel = xg.train(trainParams, altTrainingDipho)
 print 'done'
 
@@ -247,43 +291,12 @@ print 'Alternative training performance:'
 print 'area under roc curve for training set = %1.3f'%( roc_auc_score(diphoTrainY, altDiphoPredYxcheck, sample_weight=diphoTrainFW) )
 print 'area under roc curve for test set     = %1.3f'%( roc_auc_score(diphoTestY, altDiphoPredY, sample_weight=diphoTestFW) )
 
-#save roc_auc and associated HPs for test and train sets iff better than other ones in text file
-rocFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/rocOutputs/normRocs.txt','a+')  
-bestHPFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/rocOutputs/bestNormHPs.txt','a+')  
-lines = rocFile.readlines()
-rocScores = []
-for line in lines:
-  rocScores.append(float(line))
-print 'Norm roc list before appending:'
-print rocScores
-if(roc_auc_score(diphoTestY, diphoPredY, sample_weight=diphoTestFW) > rocScores[-1]):
-  rocFile.write('%1.3f\n' % roc_auc_score(diphoTestY, diphoPredY, sample_weight=diphoTestFW))
-  print 'best value so far. Appending to NORM file'
-  bestHPFile.write('HPs: %s --> roc_auc: %1.3f \n' % (trainParams, roc_auc_score(diphoTestY, diphoPredY, sample_weight=diphoTestFW)))
-rocFile.close()
-bestHPFile.close()
-
-#same thing for alt model
-altRocFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/rocOutputs/altRocs.txt','a+')  
-altBestHPFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/rocOutputs/bestAltHPs.txt','a+')  
-lines = altRocFile.readlines()
-altRocScores = []
-for line in lines:
-  altRocScores.append(float(line))
-print 'Alt roc scores before appending'
-print altRocScores
-if(roc_auc_score(diphoTestY, altDiphoPredY, sample_weight=diphoTestFW) > altRocScores[-1]):
-  altRocFile.write('%1.3f\n' % roc_auc_score(diphoTestY, altDiphoPredY, sample_weight=diphoTestFW))
-  print'best value so far. Appending to ALT file'
-  altBestHPFile.write('HPs: %s --> roc_auc: %1.3f \n' % (trainParams,roc_auc_score(diphoTestY, altDiphoPredY, sample_weight=diphoTestFW)))
-altRocFile.close()
-altBestHPFile.close()
-
+                                                      #### PLOTTING #### 
 
 #exit("Plotting not working for now so exit")
 #make some plots 
 plotDir = trainDir.replace('trees','plots')
-plotDir = '%s/%s'% (plotDir,paramExt)
+plotDir = '%s/%s'%paramExt
 if not path.isdir(plotDir): 
   system('mkdir -p %s'%plotDir)
 bkgEff, sigEff, nada = roc_curve(diphoTestY, diphoPredY, sample_weight=diphoTestFW)
@@ -347,8 +360,6 @@ for iBin in range(1,nOutputBins+1):
         bkgScoreHist.SetBinContent(iBin, 0)
         
 sigScoreHist.Scale(1./sigScoreHist.Integral())
-bkgScoreHist.Scale(1./bkgScoreHist.Integral())
-sigScoreHist.SetLineColor(r.kBlue)
 sigScoreHist.Draw('hist')
 bkgScoreHist.SetLineColor(r.kRed)
 bkgScoreHist.Draw('hist,same')
@@ -400,3 +411,6 @@ bkgScoreHist.Draw('hist,same')
 useSty.drawCMS()
 useSty.drawEnPu(lumi='%2.1f fb^{-1}'%opts.intLumi)
 theCanv.SaveAs('%s/altOutputScores.pdf'%plotDir)
+
+print('/n End of training for given hyperparameter. Begin next training... /n')
+'''

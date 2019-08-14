@@ -7,16 +7,31 @@ import xgboost as xg
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from math import pi
 import pickle
 from sklearn.metrics import roc_auc_score, roc_curve
 from os import path, system
 from array import array
-from addRowFunctions import addPt, truthDipho, reco, diphoWeight, altDiphoWeight, truthJets, jetWeight, truthClass, jetPtToClass, jetWeight, jetPtToggHClass, sqrtJetWeight, cbrtJetWeight
+from addRowFunctions import addPt, truthDipho, reco, diphoWeight, altDiphoWeight, truthJets, jetWeight, truthClass, jetPtToClass, procWeight, jetPtToggHClass, sqrtJetWeight, cbrtJetWeight
 from otherHelpers import prettyHist, getAMS, computeBkg, getRealSigma
 from root_numpy import tree2array, fill_hist
 import usefulStyle as useSty
+from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score, log_loss
-from math import pi, log
+from sklearn.externals import joblib
+
+#NN imports
+from keras.models import Sequential
+from keras.initializers import RandomNormal
+from keras.layers import Dense
+from keras.layers import Activation
+from keras.layers import *
+from keras.optimizers import Nadam
+from keras.optimizers import adam
+from keras.regularizers import l2
+from keras.callbacks import EarlyStopping
+from keras.utils import np_utils
+import h5py #import local version of this since CMSSW has old version
 
 #configure options
 from optparse import OptionParser
@@ -33,17 +48,17 @@ def checkDir( dName ):
     system('mkdir -p %s'%dName)
   return dName
 
-#setup global variables. Note no validation fraction; validation done in CV
+#setup global variables
 trainDir = checkDir(opts.trainDir)
 frameDir = checkDir(trainDir.replace('trees','frames'))
 modelDir = checkDir(trainDir.replace('trees','models'))
 plotDir  = checkDir(trainDir.replace('trees','plots') + '/nJetCategorisation')
 if opts.trainParams: opts.trainParams = opts.trainParams.split(',')
 trainFrac = 0.7
+validFrac = 0.1
 nJetClasses = 3
 nClasses = 9 
 binNames = ['0J low','0J high', '1J low', '1J med', '1J high', '2J low low', '2J low med', '2J low high', 'BSM']
-weightScale = False #scale weights to be closer to one
 
 #define the different sets of variables used
 diphoVars  = ['leadmva','subleadmva','leadptom','subleadptom',
@@ -63,6 +78,9 @@ jetVars  = ['n_rec_jets','dijet_Mjj',
               'dijet_leadPUMVA','dijet_subleadPUMVA','dijet_subsubleadPUMVA',
               'dijet_leadDeltaPhi','dijet_subleadDeltaPhi','dijet_subsubleadDeltaPhi',
               'dijet_leadDeltaEta','dijet_subleadDeltaEta','dijet_subsubleadDeltaEta']
+
+#Set random seed for reproducibility
+np.random.RandomState(12345)
 
 #get trees from files, put them in data frames
 procFileMap = {'ggh':'Merged.root'}
@@ -117,8 +135,10 @@ if not opts.dataFrame:
   trainTotal = trainTotal[trainTotal.leadptom>0.333]
   trainTotal = trainTotal[trainTotal.subleadptom>0.25]
   trainTotal = trainTotal[trainTotal.stage1cat>-1.]
-  trainTotal = trainTotal[trainTotal.dijet_Mjj<350]
   print 'done basic preselection cuts'
+
+  #FIXME: trying to make datasig and df ehre more inline (since they should be the same)
+  
  
   #add extra info to dataframe
   print 'about to add extra columns'
@@ -127,25 +147,18 @@ if not opts.dataFrame:
   trainTotal['truthClass'] = trainTotal.apply(truthClass, axis=1)
   trainTotal['truthJets'] = trainTotal.apply(truthJets, axis=1)
   trainTotal['jetWeight'] = trainTotal.apply(jetWeight, axis=1)
-  trainTotal['sqrtJetWeight'] = trainTotal.apply(sqrtJetWeight, axis=1)
-  trainTotal['cbrtJetWeight'] = trainTotal.apply(cbrtJetWeight, axis=1)
+  #trainTotal['sqrtJetWeight'] = trainTotal.apply(sqrtJetWeight, axis=1)
+  #trainTotal['cbrtJetWeight'] = trainTotal.apply(cbrtJetWeight, axis=1)
   print 'all columns added'
 
   #only select processes relevant for nJet training
   trainTotal = trainTotal[trainTotal.truthJets>-1]
   trainTotal = trainTotal[trainTotal.reco!=-1]
   trainTotal = trainTotal[trainTotal.truthClass!=-1]
-  #Remove vbf-like classes as don't care about predicting them
-  # onlt do this at gen level in training!
+  #Remove vbf-like classes as don't care about predicting them (removes m_jj>350)
   trainTotal = trainTotal[trainTotal.truthClass<9]
- 
-  if weightScale:
-    print('MC weights before were:')
-    print(trainTotal['weight'].head(10))
-    trainTotal.loc[:,'weight'] *= 1000
-    print('weights after scaling are:') 
-    print(trainTotal['weight'].head(10))
-  
+  trainTotal = trainTotal.replace(-999,-10)  
+
   #save as a pickle file
   trainTotal.to_pickle('%s/jetTotal.pkl'%frameDir)
   print 'frame saved as %s/jetTotal.pkl'%frameDir
@@ -162,24 +175,17 @@ print '0J sum of weights is %.6f, frac is %.6f'%(sumW_0J, sumW_0J/(sumW_0J+sumW_
 print '1J sum of weights is %.6f, frac is %.6f'%(sumW_1J, sumW_1J/(sumW_0J+sumW_1J+sumW_2J))
 print '2J sum of weights is %.6f, frac is %.6f'%(sumW_2J, sumW_2J/(sumW_0J+sumW_1J+sumW_2J))
 
-#check sum of weights for the classes being predicted are equal
-sumJW_0J = np.sum( trainTotal[trainTotal.truthJets==0]['jetWeight'].values ) 
-print 'Sum of weights for class %i: %.5f' %(0,sumJW_0J) 
-sumJW_1J = np.sum( trainTotal[trainTotal.truthJets==1]['jetWeight'].values ) 
-print 'Sum of weights for class %i: %.5f' %(1,sumJW_1J) 
-sumJW_2J = np.sum( trainTotal[trainTotal.truthJets==2]['jetWeight'].values ) 
-print 'Sum of weights for class %i: %.5f' %(2,sumJW_2J) 
-
 #shape and shuffle definitions
 theShape = trainTotal.shape[0]
 classShuffle = np.random.permutation(theShape)
 classTrainLimit = int(theShape*trainFrac)
+classValidLimit = int(theShape*(trainFrac+validFrac))
 
-#setup the various datasets for multiclass training. 
+#setup the various datasets for multiclass training
 classI        = trainTotal[jetVars].values
 classJ        = trainTotal['truthJets'].values
 classMjjTruth = trainTotal['gen_dijet_Mjj'].values
-classJW       = trainTotal['sqrtJetWeight'].values #Depends on the weight scenario
+classJW       = trainTotal['jetWeight'].values #changes depending on weight scenario
 classFW       = trainTotal['weight'].values
 classM        = trainTotal['CMS_hgg_mass'].values
 classN        = trainTotal['n_rec_jets'].values
@@ -187,19 +193,7 @@ classP        = trainTotal['diphopt'].values
 classR        = trainTotal['reco'].values
 classY        = trainTotal['truthClass'].values
 
-#shuffle datasets
-classI        = classI[classShuffle]
-classJ        = classJ[classShuffle]
-classMjjTruth = classMjjTruth[classShuffle]
-classJW       = classJW[classShuffle]
-classFW       = classFW[classShuffle]
-classM        = classM[classShuffle]
-classN        = classN[classShuffle]
-classP        = classP[classShuffle]
-classR        = classR[classShuffle]
-classY        = classY[classShuffle]
-
-# Include info for 1.1 categorisation for debugging
+# Include gen level info for 1.1 categorisation for debugging
 classGenPtH   = trainTotal['gen_pTH'].values
 classMjj      = trainTotal['dijet_Mjj'].values
 classGenMjj   = trainTotal['gen_dijet_Mjj'].values
@@ -213,36 +207,50 @@ classGenMjj   = classGenMjj[classShuffle]
 classPtHjj    = classPtHjj[classShuffle]     
 classGenPtHjj = classGenPtHjj[classShuffle]  
 
+#shuffle datasets
+classI        = classI[classShuffle]
+classJ        = classJ[classShuffle]
+classMjjTruth = classMjjTruth[classShuffle]
+classJW       = classJW[classShuffle]
+classFW       = classFW[classShuffle]
+classM        = classM[classShuffle]
+classN        = classN[classShuffle]
+classP        = classP[classShuffle]
+classR        = classR[classShuffle]
+classY        = classY[classShuffle]
 
 #split datasets
-classTrainI, classTestI  = np.split( classI,  [classTrainLimit] )
-classTrainJ, classTestJ  = np.split( classJ,  [classTrainLimit] )
-classTrainMjjTruth, classTestMjjTruth = np.split( classMjjTruth, [classTrainLimit] )
-classTrainJW, classTestJW  = np.split( classJW,  [classTrainLimit] )
-classTrainFW, classTestFW  = np.split( classFW,  [classTrainLimit] )
-classTrainM,  classTestM  = np.split( classM,  [classTrainLimit] )
-classTrainN,  classTestN  = np.split( classN,  [classTrainLimit] )
-classTrainP,  classTestP  = np.split( classP,  [classTrainLimit] )
-classTrainR,  classTestR  = np.split( classR,  [classTrainLimit] )
-classTrainY,  classTestY  = np.split( classY,  [classTrainLimit] )
+classTrainI, classValidI, classTestI     = np.split( classI,  [classTrainLimit,classValidLimit] )
+classTrainJ, classValidJ, classTestJ     = np.split( classJ,  [classTrainLimit,classValidLimit] )
+classTrainMjjTruth, classValidMjjTruth, classTestMjjTruth = np.split( classMjjTruth, [classTrainLimit,classValidLimit] )
+classTrainJW, classValidJW, classTestJW  = np.split( classJW,  [classTrainLimit,classValidLimit] )
+classTrainFW, classValidFW, classTestFW  = np.split( classFW,  [classTrainLimit,classValidLimit] )
+classTrainM, classValidM, classTestM     = np.split( classM,  [classTrainLimit,classValidLimit] )
+classTrainN, classValidN, classTestN     = np.split( classN,  [classTrainLimit,classValidLimit] )
+classTrainP, classValidP, classTestP     = np.split( classP,  [classTrainLimit,classValidLimit] )
+classTrainR, classValidR, classTestR     = np.split( classR,  [classTrainLimit,classValidLimit] )
+classTrainY, classValidY, classTestY     = np.split( classY,  [classTrainLimit,classValidLimit] )
 
-#Do the same but with the info used later in the cross check
-classTrainGenPtH, classTestGenPtH  = np.split( classGenPtH,  [classTrainLimit] )
-classTrainMjj, classTestMjj  = np.split( classMjj,  [classTrainLimit] )
-classTrainGenMjj,  classTestGenMjj  = np.split( classGenMjj,  [classTrainLimit] )
-classTrainPtHjj,  classTestPtHjj  = np.split( classPtHjj,  [classTrainLimit] )
-classTrainGenPtHjj,  classTestGenPtHjj  = np.split( classGenPtHjj,  [classTrainLimit] )
+classTrainGenPtH, classValidGenPtH, classTestGenPtH  = np.split( classGenPtH,  [classTrainLimit,classValidLimit] )
+classTrainMjj, classValidMjj, classTestMjj           = np.split( classMjj,  [classTrainLimit,classValidLimit] )
+classTrainGenMjj, classValidGenMjj, classTestGenMjj  = np.split( classGenMjj,  [classTrainLimit,classValidLimit] )
+classTrainPtHjj,  classValidPtHjj, classTestPtHjj    = np.split( classPtHjj,  [classTrainLimit,classValidLimit] )
+classTrainGenPtHjj,  classValidGenPtHjj, classTestGenPtHjj  = np.split( classGenPtHjj,  [classTrainLimit,classValidLimit] )
 
-#build the jet-classifier
-trainingJet = xg.DMatrix(classTrainI, label=classTrainJ, weight=classTrainJW, feature_names=jetVars)
-testingJet  = xg.DMatrix(classTestI,  label=classTestJ,  weight=classTestFW, feature_names=jetVars)
-trainParams = {}
-trainParams['objective'] = 'multi:softprob'
-trainParams['num_class'] = nJetClasses
-trainParams['nthread'] = 1
-trainParams['eval_metric'] = 'mlogloss'
+#Normalise features and encode target column
+y_train_onehot  = np_utils.to_categorical(classTrainJ, num_classes=3)
+y_valid_onehot  = np_utils.to_categorical(classValidJ, num_classes=3)
+y_test_onehot   = np_utils.to_categorical(classTestJ, num_classes=3)
+scaler          = StandardScaler()
+X_train_scaled  = scaler.fit_transform(classTrainI)
+X_valid_scaled  = scaler.transform(classValidI)
+X_test_scaled   = scaler.transform(classTestI)
 
+#(pd.DataFrame(X_test_scaled)).to_pickle('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/debug/X_test_scaled.pkl')
+
+# read in the HPs:
 paramExt = ''
+trainParams = {}
 if opts.trainParams:
   paramExt = '__'
   for pair in opts.trainParams:
@@ -252,83 +260,146 @@ if opts.trainParams:
     paramExt += '%s_%s__'%(key,data)
   paramExt = paramExt[:-2]
 
-'''
-print 'starting cross validation'
-cvResult = xg.cv(trainParams, trainingJet, num_boost_round=2000,  nfold = 4, early_stopping_rounds = 50, stratified = True, verbose_eval=True , seed = 12345)
-print('Best number of trees = {}'.format(cvResult.shape[0]))
-trainParams['n_estimators'] = cvResult.shape[0]
-'''
+print(trainParams)
 
-#Fit the model with best n_trees/estimators
-print('Fitting on the training data')
-jetModel = xg.train(trainParams, trainingJet) 
-print('Done')
+numLayers = int(trainParams['hiddenLayers'],10)
+nodes     = int(trainParams['nodes'],10)
+dropout   = float(trainParams['dropout'])
+batchSize = int(trainParams['batchSize'],10)
 
-#save
-'''
+#save file
+#scalerFile      = ('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/NNscalers/XTrainScalar_nJet__%s.save' % (paramExt))
+#joblib.dump(scaler, scalerFile)
+
+#build the jet-classifier NN
+num_inputs  = X_train_scaled.shape[1]
+num_outputs = nJetClasses
+
+model = Sequential()                                                                                            
+
+for i, nodes in enumerate([200] * numLayers):
+  if i == 0: #first layer
+    model.add(
+    Dense(
+            nodes,
+            kernel_initializer='glorot_normal',
+            activation='relu',
+            kernel_regularizer=l2(1e-5),
+            input_dim=num_inputs
+            )
+    )
+    model.add(Dropout(dropout))
+  else: #hidden layers
+    model.add(
+    Dense(
+            nodes,
+            kernel_initializer='glorot_normal',
+            activation='relu',
+            kernel_regularizer=l2(1e-5),
+            )
+    )
+    model.add(Dropout(dropout))
+
+#final layer
+model.add(
+        Dense(
+            num_outputs,
+            kernel_initializer=RandomNormal(),
+            activation='softmax'
+            )
+        )
+
+model.compile(
+        loss='categorical_crossentropy',
+        optimizer=Nadam(),
+        metrics=['accuracy']
+)
+callbacks = []
+callbacks.append(EarlyStopping(patience=50))
+model.summary()
+
+
+print 'about to train jet counting NN'
+
+history = model.fit(
+    X_train_scaled,
+    y_train_onehot,
+    class_weight=classTrainFW,
+    validation_data=(X_valid_scaled,y_valid_onehot),
+    batch_size=batchSize,
+    epochs=1000,
+    shuffle=True,
+    callbacks=callbacks
+    )
+print 'done'
+
+
+#save model - don't do if optimising the model
+
 modelDir = trainDir.replace('trees','models')
 if not path.isdir(modelDir):
   system('mkdir -p %s'%modelDir)
-jetModel.save_model('%s/nJetModelWithSqrtEQWeights%s.model'%(modelDir,paramExt))
-print 'saved as %s/jetModelWithSqrtEQWeightsWeights%s.model'%(modelDir,paramExt)
+model.save('%s/nJetNN_MCWeights_%s.h5'%(modelDir,paramExt))
+print 'saved as %s/nJetNN_MCWeights_%s.h5'%(modelDir,paramExt)
+
+
+'''
+#get predicted values (priors)
+predProbJet = model.predict(testingJet).reshape(classTestJ.shape[0],nJetClasses) #FIXME: same as this but for 9 clases
+totSumW = sumW_0J + sumW_1J +sumW_2J 
+priors = np.array( [sumW_0J/totSumW, sumW_1J/totSumW, sumW_2J/totSumW] ) 
+predProbJet *= priors 
+classPredJ = np.argmax(predProbJet, axis=1) 
 '''
 
-#get predicted values. Can include priors here
-predProbJet = jetModel.predict(testingJet).reshape(classTestJ.shape[0],nJetClasses) 
-#totSumW = sumW_0J + sumW_1J +sumW_2J 
-#priors = np.array( [sumW_0J/totSumW, sumW_1J/totSumW, sumW_2J/totSumW] ) 
-#predProbJet *= priors 
-classPredJ = np.argmax(predProbJet, axis=1) 
+#Get predicted values (no priors)
+yProb      = model.predict(X_test_scaled)
+classPredJ = yProb.argmax(axis=-1)
 
 #create dataframe to do pred cats
 predFrame = pd.concat([pd.DataFrame(classPredJ), pd.DataFrame(classTestP), pd.DataFrame(classTestPtHjj), pd.DataFrame(classTestMjj) ], axis=1)
 predFrame.columns = ['n_pred_jets', 'diphopt', 'ptHjj', 'dijet_Mjj']
-predFrame['predClass'] = predFrame.apply(jetPtToggHClass, axis=1)
-classPredY = predFrame['predClass'].values
-print 'pred frame'
-print(predFrame.head(10))
-
-#cross check: save data frame to check everything is being printed binned and catgeorised correctly
-testTotal = pd.concat([pd.DataFrame(classTestJ), pd.DataFrame(classTestGenPtH), pd.DataFrame(classTestGenPtHjj),pd.DataFrame(classTestGenMjj),pd.DataFrame(classTestY), pd.DataFrame(classTestN), predFrame, pd.DataFrame(classTestR) ], axis=1)
-#rename cols so they match the defs in the row function
-testTotal.columns = ['n_truth_jets','gen_pTH','gen_pTHjj','gen_Mjj', 'truthClass','n_rec_jets','n_pred_jets', 'diphopt', 'ptHjj', 'Mjj', 'pred_class','reco_class']
-testTotal.to_pickle('%s/jetTotalModified.pkl'%frameDir)
-print 'frame saved as %s/jetTotalModified.pkl'%frameDir
+predFrame['predggHClass'] = predFrame.apply(jetPtToggHClass, axis=1)
+classPredY = (predFrame['predggHClass'].values).astype('int')
 
 
 print
 print 'reconstructed  number of jets =  %s'%classTestN.astype('int')
-print 'BDT predicted  number of jets =  %s'%classPredJ
-print 'truth          number of jets =  %s'%classTestJ
-print 'BDT predicted  number of jets =  %s'%classPredJ
-print 'reconstructed     diphoton pt =  %s'%classTestP
-
+print 'NN predicted  number of jets  =  %s'%classPredJ
+print 'truth number of jets          =  %s'%classTestJ
+print 'NN predicted  number of jets  =  %s'%classPredJ
+print 'reconstructed diphoton pt     =  %s'%classTestP
+print
 print '                   reco class =  %s' %classTestR
-print '          BDT predicted class =  %s'%classPredY
+print '          NN predicted class  =  %s'%classPredY
 print '                  truth class =  %s'%classTestY
 print
 
-
-#NOTE: Below, in the calcualtion of accuracy, efficiency, and the purity matrices,
-# We haven't included the contribution from ggH vbf-like procs into the 9 reco categories
-# Hence this is imcomplete. However, the contamination is small, so it can still serve as
-# an approximation. Best to just calculate these values in the sigificances script, since there
-# we don't remive the ggH VBF-like event at gen level, which we do do here
-
-BDTaccuracy = accuracy_score(classTestY,classPredY)#,sample_weight=classTestFW)
+#Evaluate accuracy score for STXS classes (not jet classes)
 print
-print('Accuracy score for the BDT is: %.4f' %(BDTaccuracy)) 
-print('Accuracy score for Reco is  : %.4f' %(accuracy_score(classTestY,classTestR,sample_weight=classTestFW)))
-print
+print('Accuracy score for the NN is: %.4f' % (accuracy_score(classTestY,classPredY,sample_weight=classTestFW)))
+print('Accuracy score for Reco is  : %.4f' % (accuracy_score(classTestY,classTestR,sample_weight=classTestFW)))
 
-#Calculate the loss on the test set, rather than the accruacy and eff
-#Need to evaluate the loss of predicting jet number rather than class since this was learning task
-mLogLoss = log_loss(classTestJ,predProbJet,sample_weight=classTestJW)
-print
-print('BDT multiclass log loss is: %.4f' %(mLogLoss)) 
-print
+NNaccuracy = accuracy_score(classTestY,classPredY,sample_weight=classTestFW)
 
-### Plotting ###
+#calculate the log loss
+mLogLoss = log_loss(classTestJ, yProb)#, sample_weight=classTestJW)
+print 'NN log-loss=  %.4f' %mLogLoss
+
+########
+#predict on entire data set, normalising using same standard scalar as before
+#classI = scaler.transform(classI)
+#y_prob = model.predict(classI)
+#classPredJ = y_prob.argmax(axis=-1)
+#predFrame = pd.concat([pd.DataFrame(classPredJ), pd.DataFrame(classP)], axis=1)
+#predFrame.columns = ['n_pred_jets', 'diphopt'] 
+#predFrame['predggHClass'] = predFrame.apply(jetPtToggHClass, axis=1)
+#classPredY = (predFrame['predggHClass'].values).astype('int')
+#print('Accuracy score on model evaluated on entire data set is : %.4f' % (accuracy_score(classY,classPredY,sample_weight=classFW)))
+#print
+########
+
+### Plotting ### NOTE: we dont actually use any plots made here; do the main plotting in data sigs
 
 #define h_truth_class, h_pred_class FROM RECO, and h_right and h_wrong for eff hist
 canv = useSty.setCanvas()
@@ -357,8 +428,8 @@ for true,guess,w in zip(classTestY,classTestR,classTestFW):
     truthHist.Fill(true,w)
     predHist.Fill(guess,w)
     if true==guess: rightHist.Fill(true,w)
-    else: wrongHist.Fill(true,w)
-       
+    else: wrongHist.Fill(true,w) 
+
 #ratio of bin i entries to bin 1 entries
 firstBinVal = -1.
 for iBin in range(1,truthHist.GetNbinsX()+1):
@@ -377,24 +448,24 @@ truthHist.GetYaxis().SetRangeUser(0.,8.)
 truthHist.Draw('hist')
 useSty.drawCMS()
 useSty.drawEnPu(lumi='%.1f fb^{-1}'%opts.intLumi)
-canv.Print('%s/truthJetHist%s.pdf'%(plotDir,paramExt))
-canv.Print('%s/truthJetHist%s.png'%(plotDir,paramExt))
+#canv.Print('%s/truthJetHist%s.pdf'%(plotDir,paramExt))
+#canv.Print('%s/truthJetHist%s.png'%(plotDir,paramExt))
 predHist.GetYaxis().SetRangeUser(0.,8.)
 predHist.Draw('hist')
 useSty.drawCMS()
 useSty.drawEnPu(lumi='%.1f fb^{-1}'%opts.intLumi)
-canv.Print('%s/recoPredJetHist%s.pdf'%(plotDir,paramExt))
-canv.Print('%s/recoPredJetHist%s.png'%(plotDir,paramExt))
+#canv.Print('%s/recoPredJetHist%s.pdf'%(plotDir,paramExt))
+#canv.Print('%s/recoPredJetHist%s.png'%(plotDir,paramExt))
 rightHist.GetYaxis().SetRangeUser(0.,1.)
 rightHist.Draw('hist TEXT')
 useSty.drawCMS()
 useSty.drawEnPu(lumi='%.1f fb^{-1}'%opts.intLumi)
-canv.Print('%s/recoEfficiencyJetHist%s.pdf'%(plotDir,paramExt))
-canv.Print('%s/recoEfficiencyJetHist%s.png'%(plotDir,paramExt))
+#canv.Print('%s/recoEfficiencyJetHist%s.pdf'%(plotDir,paramExt))
+#canv.Print('%s/recoEfficiencyJetHist%s.png'%(plotDir,paramExt))
 #canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/recoEfficiencyJetHist%s.pdf'%(paramExt))
 
-'''
 #print effeciency averages to text file for comparisons (reco) (first 9 bins only)
+'''
 recoAveragesFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nJetOutputs/reco_eff_averages.txt','a+')
 recoAveragesHPFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nJetOutputs/reco_eff_averages_HP.txt','a+')
 eff_array = np.zeros(nClasses)
@@ -411,7 +482,7 @@ if (np.average(eff_array) > recoAverages[-1]):
 recoAveragesFile.close()
 '''
 
-#setup more 1D hists for truth class, BDT PREDICTED class, right, and wrong
+#setup more 1D hists for truth class, NN PREDICTED class, right, and wrong
 canv = useSty.setCanvas()
 truthHist = r.TH1F('truthHist','truthHist',nClasses,-0.5,nClasses-0.5)
 truthHist.SetTitle('')
@@ -445,7 +516,7 @@ for iBin in range(1,truthHist.GetNbinsX()+1):
     ratio = float(truthHist.GetBinContent(iBin)) / firstBinVal
     print 'ratio for bin %g is %1.7f'%(iBin,ratio)
    
-#plot and save results for BDT PREDICTION 
+#plot and save results for NN PREDICTION 
 wrongHist.Add(rightHist)
 rightHist.Divide(wrongHist)
 effHist = r.TH1F
@@ -454,24 +525,24 @@ truthHist.GetYaxis().SetRangeUser(0.,8.)
 truthHist.Draw('hist')
 useSty.drawCMS()
 useSty.drawEnPu(lumi='%.1f fb^{-1}'%opts.intLumi)
-canv.Print('%s/truthJetHist%s.pdf'%(plotDir,paramExt))
-canv.Print('%s/truthJetHist%s.png'%(plotDir,paramExt))
+#canv.Print('%s/truthJetHist%s.pdf'%(plotDir,paramExt))
+#canv.Print('%s/truthJetHist%s.png'%(plotDir,paramExt))
 predHist.GetYaxis().SetRangeUser(0.,8.)
 predHist.Draw('hist')
 useSty.drawCMS()
 useSty.drawEnPu(lumi='%.1f fb^{-1}'%opts.intLumi)
-canv.Print('%s/predJetHist%s.pdf'%(plotDir,paramExt))
-canv.Print('%s/predJetHist%s.png'%(plotDir,paramExt))
+#canv.Print('%s/predJetHist%s.pdf'%(plotDir,paramExt))
+#canv.Print('%s/predJetHist%s.png'%(plotDir,paramExt))
 rightHist.GetYaxis().SetRangeUser(0.,1.)
 rightHist.Draw('hist TEXT')
 useSty.drawCMS(onTop=True)
 useSty.drawEnPu(lumi='%.1f fb^{-1}'%opts.intLumi)
-canv.Print('%s/efficiencyJetHist%s.pdf'%(plotDir,paramExt))
-canv.Print('%s/efficiencyJetHist%s.png'%(plotDir,paramExt))
+#canv.Print('%s/efficiencyJetHist%s.pdf'%(plotDir,paramExt))
+#canv.Print('%s/efficiencyJetHist%s.png'%(plotDir,paramExt))
 #canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/efficiencyJetHist%s.pdf'%(paramExt))
 
-'''
 #print some stat params to text file for comparisons (BDT pred) (first 9 bins only)
+'''
 predAveragesFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nJetOutputs/pred_eff_averages.txt','a+')
 predAveragesHPFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nJetOutputs/pred_eff_averages_HP.txt','a+')
 eff_array = np.zeros(nClasses)
@@ -489,24 +560,28 @@ predAveragesFile.close()
 predAveragesHPFile.close()
 '''
 
+#print log-loss to text file (used in HP optimiastion). Print other params too for interest                     
+'''
+lossFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/Losses/nJetNN/losses_NoW.txt','a+')
+lossHPFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/Losses/nJetNN/losses_NoW_HP.txt','a+')
+eff_array = np.zeros(nClasses)
+for iBin in range(1, nClasses+1):
+  eff_array[iBin-1] = rightHist.GetBinContent(iBin)
+print 'loss list is:'
+print (eff_array)
+print('NN avg eff: %1.4f' %(np.average(eff_array)))
+lines = lossFile.readlines()
+lossList = []
+for line in lines:
+  lossList.append(float(line))
+if (mLogLoss < lossList[-1]):
+  lossFile.write('%1.4f\n' % mLogLoss) 
+  lossHPFile.write('HPs: %s --> loss: %1.4f. acc:%1.4f. <eff>: %1.4f\n' % (trainParams,mLogLoss,NNaccuracy,np.average(eff_array)) ) 
+lossFile.close()
+lossHPFile.close()
+'''
 
-#print log-loss to text file, if smallest (in HP optimiastion). Print other params too for interest
-#lossFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/Losses/nJetBDT/losses_EW.txt','a+')
-#lossHPFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/Losses/nJetBDT/losses_EW.txt','a+')
-#eff_array = np.zeros(nClasses)
-#for iBin in range(1, nClasses+1):
-#  eff_array[iBin-1] = rightHist.GetBinContent(iBin)
-#print('BDT avg eff: %1.4f' %(np.average(eff_array)))
-#lines = lossFile.readlines()
-#lossList = []
-#for line in lines:
-#  lossList.append(float(line))
-#if (mLogLoss < lossList[-1]):
-#  lossFile.write('%1.4f\n' % mLogLoss) 
-#  lossHPFile.write('HPs: %s --> loss: %1.4f. acc:%1.4f. <eff>: %1.4f\n' % (trainParams,mLogLoss,BDTaccuracy,np.average(eff_array)) ) 
-#lossFile.close()
-#lossHPFile.close()
-
+'''
 #declare 2D hists
 nBinsX=nClasses
 nBinsY=nClasses
@@ -608,36 +683,27 @@ canv = r.TCanvas()
 r.gStyle.SetPaintTextFormat('2.0f')
 prettyHist(procHistReco)
 procHistReco.Draw('colz,text')
-canv.Print('%s/procJetHistReco%s.pdf'%(plotDir,paramExt))
-canv.Print('%s/procJetHistReco%s.png'%(plotDir,paramExt))
+#canv.Print('%s/procJetHistReco%s.pdf'%(plotDir,paramExt))
+#canv.Print('%s/procJetHistReco%s.png'%(plotDir,paramExt))
 prettyHist(catHistReco)
 catHistReco.Draw('colz,text')
-canv.Print('%s/catJetHistReco%s.pdf'%(plotDir,paramExt))
-canv.Print('%s/catJetHistReco%s.png'%(plotDir,paramExt))
+#canv.Print('%s/catJetHistReco%s.pdf'%(plotDir,paramExt))
+#canv.Print('%s/catJetHistReco%s.png'%(plotDir,paramExt))
 prettyHist(procHistPred)
 procHistPred.Draw('colz,text')
-canv.Print('%s/procJetHistPred%s.pdf'%(plotDir,paramExt))
-canv.Print('%s/procJetHistPred%s.png'%(plotDir,paramExt))
-#canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/bestModelParams/nJetBDT/EQWeights/PurityMatrixNormByCol.pdf')
+#canv.Print('%s/procJetHistPred%s.pdf'%(plotDir,paramExt))
+#canv.Print('%s/procJetHistPred%s.png'%(plotDir,paramExt))
 prettyHist(catHistPred)
 catHistPred.Draw('colz,text')
-canv.Print('%s/catJetHistPred%s.pdf'%(plotDir,paramExt))
-canv.Print('%s/catJetHistPred%s.png'%(plotDir,paramExt))
-
-
-# get feature importances
-plt.figure(1)
-xg.plot_importance(jetModel)
-plt.show()
-plt.savefig('%s/classImportances%s.pdf'%(plotDir,paramExt))
-plt.savefig('%s/classImportances%s.png'%(plotDir,paramExt))
-#plt.savefig('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/classImportances%s.pdf'%(paramExt))
-
+#canv.Print('%s/catJetHistPred%s.pdf'%(plotDir,paramExt))
+#canv.Print('%s/catJetHistPred%s.png'%(plotDir,paramExt))
+#canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nJetNNPlots/PurityMatrix.pdf')
 
 ### Radar plots ###
 #Fill correct and incorrect dicts
 correctDict   = {0:[],1:[],2:[],3:[],4:[],5:[],6:[],7:[],8:[]}
 incorrectDict = {0:[],1:[],2:[],3:[],4:[],5:[],6:[],7:[],8:[]}
+
 
 for true, guess, weight in zip(classTestY, classPredY, classTestFW):
   if true==guess:
@@ -659,12 +725,12 @@ correctArray   = np.asarray(correctList)
 incorrectArray = np.asarray(incorrectList)
 
 #calculate efficiency
-effArrayBDT = correctArray/(correctArray+incorrectArray)
+effArrayNN = correctArray/(correctArray+incorrectArray)
 
 #NB this metric does not care about number of events in cats, unlike accuracy
-print('BDT effs are:')
-print(effArrayBDT)
-print('\nAverage BDT eff is: %f'%effArrayBDT.mean())
+print('Cat effs are:')
+print(effArrayNN)
+print('\nAverage NN eff is: %f'%effArrayNN.mean())
 
 #Do same thing for reco so we can compare
 #Fill correct and incorrect dicts
@@ -690,22 +756,25 @@ correctArray   = np.asarray(correctList)
 incorrectArray = np.asarray(incorrectList)
 
 effArrayReco = correctArray/(correctArray+incorrectArray)
-print('reco Effs are:')
+print('Effs are:')
 print(effArrayReco)
 print('\nAverage Reco eff is: %f'%effArrayReco.mean())
 
 #do plotting
 df = pd.DataFrame({
-    'group':['BDT','Reco'],
-    'Bin 1': [effArrayBDT[0], effArrayReco[0]],
-    'Bin 2': [effArrayBDT[1], effArrayReco[1]],
-    'Bin 3': [effArrayBDT[2], effArrayReco[2]],
-    'Bin 4': [effArrayBDT[3], effArrayReco[3]],
-    'Bin 5': [effArrayBDT[4], effArrayReco[4]],
-    'Bin 6': [effArrayBDT[5], effArrayReco[5]],
-    'Bin 7': [effArrayBDT[6], effArrayReco[6]],
-    'Bin 8': [effArrayBDT[7], effArrayReco[7]],
-    'Bin 9': [effArrayBDT[8], effArrayReco[8]] 
+    'group':['NN','Reco'],
+    'Bin 1': [effArrayNN[0], effArrayReco[0]],
+    'Bin 2': [effArrayNN[1], effArrayReco[1]],
+    'Bin 3': [effArrayNN[2], effArrayReco[2]],
+    'Bin 4': [effArrayNN[3], effArrayReco[3]],
+    'Bin 2': [effArrayNN[1], effArrayReco[1]],
+    'Bin 3': [effArrayNN[2], effArrayReco[2]],
+    'Bin 4': [effArrayNN[3], effArrayReco[3]],
+    'Bin 5': [effArrayNN[4], effArrayReco[4]],
+    'Bin 6': [effArrayNN[5], effArrayReco[5]],
+    'Bin 7': [effArrayNN[6], effArrayReco[6]],
+    'Bin 8': [effArrayNN[7], effArrayReco[7]],
+    'Bin 9': [effArrayNN[8], effArrayReco[8]] 
 })
 
 print(df)
@@ -719,7 +788,6 @@ N = len(categories)
 angles = [n / float(N) * 2 * pi for n in range(N)]
 angles += angles[:1]
 
-
 # Initialise the spider plot
 plt.figure(2)
 ax = plt.subplot(111, polar=True)
@@ -731,14 +799,13 @@ plt.xticks(angles[:-1], categories, color='grey', size=8)
 ax.set_rlabel_position(0)
 plt.yticks([0.2,0.4,0.6,0.8], ["0.2","0.4","0.6","0.8"], color="grey", size=7)
 plt.ylim(0,1)
-
+  
 # Plot data
-#BDT
+#NN
 values=df.loc[0].drop('group').values.flatten().tolist()
 values += values[:1]
-ax.plot(angles, values, linewidth=1, linestyle='solid', label="BDT", color='g')
-ax.fill(angles, values, 'g', alpha=0.1)
-
+ax.plot(angles, values, linewidth=1, linestyle='solid', label="NN", color='b')
+ax.fill(angles, values, 'b', alpha=0.1)
  
 # Reco
 values=df.loc[1].drop('group').values.flatten().tolist()
@@ -748,5 +815,5 @@ ax.fill(angles, values, 'r', alpha=0.1)
  
 # Add legend
 plt.legend(loc='upper right', bbox_to_anchor=(0.1, 0.1))
-#plt.savefig('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/bestModelParams/nJetBDT/EQWeights/JetBDTRadarPlot.pdf')
-
+#plt.savefig('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/NNRadarPlot.pdf')
+'''

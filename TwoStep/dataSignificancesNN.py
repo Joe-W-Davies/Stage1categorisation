@@ -9,18 +9,26 @@ import matplotlib.pyplot as plt
 import pickle
 import math
 from sklearn.metrics import roc_auc_score, roc_curve, accuracy_score
+from sklearn.preprocessing import StandardScaler
 from os import path, system
+import sys
 from array import array
-from math import pi
-
 from addRowFunctions import addPt, truthDipho, reco, diphoWeight, altDiphoWeight, truthClass, jetPtToggHClass
 from otherHelpers import prettyHist, getAMS, computeBkg, getRealSigma 
 from root_numpy import tree2array, fill_hist
 from catOptim import CatOptim
-import usefulStyle as useSty
 
 from keras.models import load_model
+from keras.utils import np_utils
 import h5py
+from math import pi
+from sklearn.externals import joblib
+import usefulStyle as useSty
+
+#save m_diphoton plots here
+#f_output = r.TFile.Open("/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/debug/nJetNNMgamgamNoDiphotBDT/diphotonMassHistos.root","RECREATE")
+f_output = r.TFile.Open("/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/debug/recoPlotsNoDiphoBDT/diphotonMassHistosNoDiphoBDTCut.root","RECREATE")
+#f_output_withBDT = r.TFile.Open("/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/debug/nJetNNMgamgamWITHDiphotBDT/diphotonMassHistos.root","RECREATE")
 
 #configure options
 from optparse import OptionParser
@@ -30,7 +38,7 @@ parser.add_option('-d','--dataFrame', default=None, help='Name of dataframe if i
 parser.add_option('-s','--signifFrame', default=None, help='Name of cleaned signal dataframe if it already exists')
 parser.add_option('-m','--modelName', default=None, help='Name of model for testing')
 parser.add_option('-c','--className', default=None, help='Name of multi-class model used to build categories. If None, use reco categories')
-parser.add_option('-n','--nIterations', default=3500, help='Number of iterations to run for random significance optimisation') #previously was default = 2000
+parser.add_option('-n','--nIterations', default=1, help='Number of iterations to run for random significance optimisation') #previously was default = 2000
 parser.add_option('--intLumi',type='float', default=35.9, help='Integrated luminosity') #def:35.9
 (opts,args)=parser.parse_args()
 
@@ -45,7 +53,7 @@ if not path.isdir(plotDir):
 nJetClasses = 3
 nClasses = 9 #runs 0->8 in opt loop 
 catNames = ['0J low','0J high', '1J low', '1J med', '1J high', '2J low', '2J med', '2J high', 'BSM']
-binNames = ['0J low','0J high', '1J low', '1J med', '1J high', '2J low', '2J med', '2J high', 'BSM', 'VBF-like']
+binNames = ['0J low','0J high', '1J low', '1J med', '1J high', '2J low', '2J med', '2J high', 'BSM','VBF-like']
 jetPriors = [0.606560, 0.270464, 0.122976]
 procPriors= [0.130697, 0.478718, 0.149646, 0.098105, 0.018315, 0.028550, 0.040312, 0.027654, 0.028003]
 #lumiScale = 137./35.9
@@ -147,12 +155,13 @@ if not opts.dataFrame:
   print 'all columns added'
   #print 'first few columns in dataTotal are:'
   #print(dataTotal.head())
+  dataTotal = dataTotal.replace(-999,-10)
 
   #save as a pickle file
   if not path.isdir(frameDir): 
     system('mkdir -p %s'%frameDir)
-  dataTotal.to_pickle('%s/dataTotal.pkl'%frameDir)
-  print 'frame saved as %s/dataTotal.pkl'%frameDir
+  dataTotal.to_pickle('%s/dataTotalNN.pkl'%frameDir)
+  print 'frame saved as %s/dataTotalNN.pkl'%frameDir
 
 #read in dataframe if above steps done before
 else:
@@ -213,8 +222,9 @@ if not opts.signifFrame:
   trainTotal = trainTotal[trainTotal.subleadptom>0.25]
   trainTotal = trainTotal[trainTotal.stage1cat>-1.]
   #remove STXS bins > 9 at reco level! can still have gen contamination
-  trainTotal = trainTotal[trainTotal.dijet_Mjj<350] 
-  
+  trainTotal = trainTotal[trainTotal.dijet_Mjj<350]
+
+
   #remove bkg then add reco tag info
   #trainTotal = trainTotal[trainTotal.stage1cat>0.01]
   #trainTotal = trainTotal[trainTotal.stage1cat<12.]
@@ -230,11 +240,17 @@ if not opts.signifFrame:
   trainTotal['truthClass'] = trainTotal.apply(truthClass, axis=1)
   print 'Successfully added reco tag info'
 
+  #emulate additional training conditions
+  #trainTotal = trainTotal[trainTotal.reco!=-1]
+  #traintotal = traintotal[traintotal.truthclass!=-1] 
+  #traintotal = traintotal[traintotal.truthclass<9] 
+  trainTotal = trainTotal.replace(-999,-10) 
+
   #save
   if not path.isdir(frameDir): 
     system('mkdir -p %s'%frameDir)
-  trainTotal.to_pickle('%s/signifTotal.pkl'%frameDir)
-  print 'MC signal frame saved as %s/signifTotal.pkl'%frameDir
+  trainTotal.to_pickle('%s/signifTotalNN.pkl'%frameDir)
+  print 'MC signal frame saved as %s/signifTotalNN.pkl'%frameDir
 
 else:
   #read in already cleaned up signal frame
@@ -244,21 +260,21 @@ else:
 
 #define the variables used as input to the classifier
 if (opts.className):
-  if 'Jet' in opts.className:
+  if 'nJetNN' in opts.className:
     diphoI  = trainTotal[jetVars].values 
   elif 'nClasses' in opts.className:
     diphoI  = trainTotal[allVars].values 
-diphoX  = trainTotal[diphoVars].values
-diphoY  = trainTotal['truthDipho'].values
-diphoJ  = trainTotal['truthClass'].values
-diphoFW = trainTotal['weight'].values
-diphoP  = trainTotal['diphopt'].values
-diphoR  = trainTotal['reco'].values
-diphoM  = trainTotal['CMS_hgg_mass'].values
-diphoMVA= trainTotal['diphomvaxgb'].values
+diphoX     = trainTotal[diphoVars].values
+diphoY     = trainTotal['truthDipho'].values
+diphoJ     = trainTotal['truthClass'].values #STXS truth class
+diphoFW    = trainTotal['weight'].values
+diphoP     = trainTotal['diphopt'].values
+diphoReco  = trainTotal['reco'].values
+diphoM     = trainTotal['CMS_hgg_mass'].values
+diphoMVA   = trainTotal['diphomvaxgb'].values
 
 if (opts.className):
-  if 'Jet' in opts.className:
+  if 'nJetNN' in opts.className:
     dataI  = dataTotal[jetVars].values 
   elif 'nClasses' in opts.className:
     dataI  = dataTotal[allVars].values 
@@ -268,13 +284,19 @@ dataFW = dataTotal['weight'].values
 dataP  = dataTotal['diphopt'].values
 dataR  = dataTotal['reco'].values
 dataM  = dataTotal['CMS_hgg_mass'].values
-dataMVA= dataTotal['diphomvaxgb'].values
+dataMVA=dataTotal['diphomvaxgb'].values
 
-#setup matrices for predicting dipho (BG rejection BDT)
+#scale the data (wont be exactly same as training though, as we include ggH vbf-like procs here
+if opts.className:
+  diphoScaler = StandardScaler()
+  diphoXTestScaled  = diphoScaler.fit_transform(diphoI) #NB no training set as not training anything here
+  dataXTestScaled   = diphoScaler.transform(dataI) #NB no training set as not training anything here
+
+#setup matrices for dipho BDT
 diphoMatrix = xg.DMatrix(diphoX, label=diphoY, weight=diphoFW, feature_names=diphoVars)
-dataMatrix  = xg.DMatrix(dataX,  label=dataY,  weight=dataFW,  feature_names=diphoVars)
+dataMatrix = xg.DMatrix(dataX, label=dataY, weight=dataFW, feature_names=diphoVars)
 
-#load the dipho model to be tested
+#load the DIPHO model to be tested (alt one here)
 diphoModel = xg.Booster()
 diphoModel.load_model('%s/%s'%(modelDir,opts.modelName))
 
@@ -282,57 +304,171 @@ diphoModel.load_model('%s/%s'%(modelDir,opts.modelName))
 diphoPredY = diphoModel.predict(diphoMatrix)
 dataPredY  = diphoModel.predict(dataMatrix)
 
-print('reco accuracy score is:')
-print(accuracy_score(diphoJ, diphoR, sample_weight=diphoFW))
+
+print('Reco accuracy is:')
+print(accuracy_score(diphoJ, diphoReco, sample_weight=diphoFW))
+
+
+
+
+
 #load the classifier model to be tested, if it exists
 #only trained the model to predict 9 categories, so exclude these from cats but keep in gen bins (purity mat)
 if opts.className:
-  #BDTs
-  classModel = xg.Booster()
-  classModel.load_model('%s/%s'%(modelDir,opts.className))
-  
-  if 'Jet' in opts.className:
-    #predict class of signal
-    classMatrix = xg.DMatrix(diphoI, label=diphoY, weight=diphoFW, feature_names=jetVars)
-    predProbJet = classModel.predict(classMatrix).reshape(diphoX.shape[0],nJetClasses)
+  model = load_model('%s/%s'%(modelDir,opts.className))
+    
+  if 'nJetNN' in opts.className:
+    predProbJet = model.predict(diphoXTestScaled)
     #if addPriors: predProbJet *= jetPriors # assumes model trained with equal weights! 
-    classPredJ = np.argmax(predProbJet, axis=1)
+    classPredJ = predProbJet.argmax(axis=-1)
     #concat the nJet prediction with everything else you need to make class predction
     predFrame = pd.concat([pd.DataFrame(classPredJ), pd.DataFrame(diphoP)], axis=1)
     predFrame.columns = ['n_pred_jets', 'diphopt']
     predFrame['predClass'] = predFrame.apply(jetPtToggHClass, axis=1)
-    diphoR = predFrame['predClass'].values  
-    #save predicted signal classes for use in purity matrices
-    print('nJet BDT accuracy score is:')
+    diphoR = (predFrame['predClass'].values).astype('int')
+    print('jet NN accuracy score is:')
     print(accuracy_score(diphoJ, diphoR, sample_weight=diphoFW))
-    dfForDiphoBDTPurityMatrices = pd.concat([pd.DataFrame(diphoR), pd.DataFrame(diphoJ), pd.DataFrame(diphoFW), pd.DataFrame(diphoMVA)], axis=1)
-    dfForDiphoBDTPurityMatrices.to_pickle('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/diphoBDTCutsForMLCat/nJetBDT/BDTPredictedCategoriesSqrtEQWeights.pkl')
-      
+    dfForPurityMatrices = pd.concat([pd.DataFrame(diphoR), pd.DataFrame(diphoJ), pd.DataFrame(diphoFW), pd.DataFrame(diphoMVA)], axis=1)
+    
+
     #same thing for background
-    classDataMatrix = xg.DMatrix(dataI, label=dataY, weight=dataFW, feature_names=jetVars)
-    predProbJet = classModel.predict(classDataMatrix).reshape(dataX.shape[0],nJetClasses)
-    if addPriors: predProbJet *= jetPriors 
-    classPredJ = np.argmax(predProbJet, axis=1)
+    predProbJet = model.predict(dataXTestScaled) 
+    #if addPriors: predProbJet *= jetPriors 
+    classPredJ = np.argmax(predProbJet, axis=-1)
     predFrame = pd.concat([pd.DataFrame(classPredJ), pd.DataFrame(dataP)], axis=1)
     predFrame.columns = ['n_pred_jets', 'diphopt']
     predFrame['predClass'] = predFrame.apply(jetPtToggHClass, axis=1)
-    dataR = predFrame['predClass'].values
- 
-
-  elif 'nClasses' in opts.className:
-    classMatrix = xg.DMatrix(diphoI, label=diphoY, weight=diphoFW, feature_names=allVars)
-    predProbJet = classModel.predict(classMatrix).reshape(diphoX.shape[0],nClasses)
+    dataR = (predFrame['predClass'].values).astype('int')
+  
+  elif 'nClassesNN' in opts.className:
+    predProbJet = model.predict(diphoXTestScaled)
+    #if addPriors: predProbJet *= procPriors
     diphoR = np.argmax(predProbJet, axis=1)
-    print('nClasses BDT accuracy score:')
+    print('nClasses NN accuracy score:')
     print(accuracy_score(diphoJ, diphoR, sample_weight=diphoFW))
- 
-    #same thing for background (no need to save for purits matrices though)
-    classDataMatrix = xg.DMatrix(dataI, label=dataY, weight=dataFW, feature_names=allVars)
-    predProbJet = classModel.predict(classDataMatrix).reshape(dataX.shape[0],nClasses)
+    dfForPurityMatrices = pd.concat([pd.DataFrame(diphoR), pd.DataFrame(diphoJ), pd.DataFrame(diphoFW), pd.DataFrame(diphoMVA)], axis=1)
+  
+    #same thing for background
+    predProbJet = model.predict(dataXTestScaled)
+    #if addPriors: predProbJet *= procPriors
     dataR = np.argmax(predProbJet, axis=1)
 
   else:
     raise Exception("your class model type is not yet supported, sorry")
+
+
+
+### Plot the m_gam,gam distribution for each of the catgeories (debug) ###
+#No diphoton BDT cut has been applied here yet -> this is just from the NN classification
+
+print 'making m_diphoton plots without dipho BDT cuts'
+
+finalFrameSig  = pd.concat([pd.DataFrame(diphoR), pd.DataFrame(diphoFW), pd.DataFrame(diphoM)],axis=1)
+finalFrameSig.columns  = ['NNClass','weight','CMS_hgg_mass']
+finalFrameData = pd.concat([pd.DataFrame(dataR), pd.DataFrame(dataFW), pd.DataFrame(dataM)],axis=1)
+finalFrameData.columns = ['NNClass','weight','CMS_hgg_mass']
+#get dicts to store np arrays of variables of interest, for each proc
+procWeightDictSig  = {}
+procWeightDictBkg  = {}
+procMggSig  = {}
+procMggData = {}
+for iProc in range(nClasses):  #from zero to 8 are ggH bins
+   procWeightDictSig[iProc]  = np.sum(finalFrameSig[finalFrameSig.NNClass==iProc]['weight'].values)
+   procWeightDictBkg[iProc]  = np.sum(finalFrameData[finalFrameData.NNClass==iProc]['weight'].values)
+   #procMggSig[iProc]  = finalFrameSig[finalFrameSig.NNClass==iProc]['CMS_hgg_mass'].values
+   #procMggData[iProc] = finalFrameData[finalFrameData.NNClass==iProc]['CMS_hgg_mass'].values
+
+print 'sig events per catgeory selected by NN: '
+print procWeightDictSig
+print 'Bkg events per catgeory selected by NN: '
+print procWeightDictBkg
+
+#with open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/debug/nJetNNMgamgamNoDiphotBDT/sigsAndBkg.txt','w+') as f: 
+#  f.write('sigs: ')
+#  f.write(str(procWeightDictSig))
+#  f.write('\n sum of sigs: %.4f' % sum(procWeightDictSig.values()))
+#  f.write('\n bkgs: ')
+#  f.write(str(procWeightDictBkg))
+#  f.write('\n sum of bkg: %.4f' % sum(procWeightDictBkg.values()))
+
+''' 
+#dont really need to do this, can just sum the weights
+#declare the 9 histos
+mggSigHistCat0 = r.TH1F('HggMassSigHistCat0',';Diphoton invariant mass score;events;', 60, 90, 220)
+mggBkgHistCat0 = r.TH1F('HggMassBkgHistCat0',';Diphoton invariant mass score;events;', 60, 90, 220)
+
+mggSigHistCat1 = r.TH1F('HggMassSigHistCat1',';Diphoton invariant mass score;events;', 60, 90, 220)
+mggBkgHistCat1 = r.TH1F('HggMassBkgHistCat1',';Diphoton invariant mass score;events;', 60, 90, 220)
+
+mggSigHistCat2 = r.TH1F('HggMassSigHistCat2',';Diphoton invariant mass score;events;', 60, 90, 220)
+mggBkgHistCat2 = r.TH1F('HggMassBkgHistCat2',';Diphoton invariant mass score;events;', 60, 90, 220)
+
+mggSigHistCat3 = r.TH1F('HggMassSigHistCat3',';Diphoton invariant mass score;events;', 60, 90, 220)
+mggBkgHistCat3 = r.TH1F('HggMassBkgHistCat3',';Diphoton invariant mass score;events;', 60, 90, 220)
+
+mggSigHistCat4 = r.TH1F('HggMassSigHistCat4',';Diphoton invariant mass score;events;', 60, 90, 220)
+mggBkgHistCat4 = r.TH1F('HggMassBkgHistCat4',';Diphoton invariant mass score;events;', 60, 90, 220)
+
+mggSigHistCat5 = r.TH1F('HggMassSigHistCat5',';Diphoton invariant mass score;events;', 60, 90, 220)
+mggBkgHistCat5 = r.TH1F('HggMassBkgHistCat5',';Diphoton invariant mass score;events;', 60, 90, 220)
+
+mggSigHistCat6 = r.TH1F('HggMassSigHistCat6',';Diphoton invariant mass score;events;', 60, 90, 220)
+mggBkgHistCat6 = r.TH1F('HggMassBkgHistCat6',';Diphoton invariant mass score;events;', 60, 90, 220)
+
+mggSigHistCat7 = r.TH1F('HggMassSigHistCat7',';Diphoton invariant mass score;events;', 60, 90, 220)
+mggBkgHistCat7 = r.TH1F('HggMassBkgHistCat7',';Diphoton invariant mass score;events;', 60, 90, 220)
+
+mggSigHistCat8 = r.TH1F('HggMassSigHistCat8',';Diphoton invariant mass score;events;', 60, 90, 220)
+mggBkgHistCat8 = r.TH1F('HggMassBkgHistCat8',';Diphoton invariant mass score;events;', 60, 90, 220)
+#fill histos and get entries
+sigAndBkgEntries = {} #form {proc num: (sig counts, bkg counts)}
+for iProc in range(nClasses):
+  for mggSig,mggBkg,w in zip( procMggSig[iProc], procMggData[iProc], procWeightDictSig[iProc]):
+    if iProc==0:
+      mggSigHistCat0.Fill(mggSig,w)
+      mggBkgHistCat0.Fill(mggBkg)
+      sigAndBkgEntries[iProc] = (mggSigHistCat0.GetEntries(), mggBkgHistCat0.GetEntries())
+    if iProc==1:
+      mggSigHistCat1.Fill(mggSig,w)
+      mggBkgHistCat1.Fill(mggBkg)
+      sigAndBkgEntries[iProc] = (mggSigHistCat1.GetEntries(), mggBkgHistCat1.GetEntries())
+    if iProc==2:
+      mggSigHistCat2.Fill(mggSig,w)
+      mggBkgHistCat2.Fill(mggBkg)
+      sigAndBkgEntries[iProc] = (mggSigHistCat2.GetEntries(), mggBkgHistCat2.GetEntries())
+    if iProc==3:
+      mggSigHistCat3.Fill(mggSig,w)
+      mggBkgHistCat3.Fill(mggBkg)
+      sigAndBkgEntries[iProc] = (mggSigHistCat3.GetEntries(), mggBkgHistCat3.GetEntries())
+    if iProc==4:
+      mggSigHistCat4.Fill(mggSig,w)
+      mggBkgHistCat4.Fill(mggBkg)
+      sigAndBkgEntries[iProc] = (mggSigHistCat4.GetEntries(), mggBkgHistCat4.GetEntries())
+    if iProc==5:
+      mggSigHistCat5.Fill(mggSig,w)
+      mggBkgHistCat5.Fill(mggBkg)
+      sigAndBkgEntries[iProc] = (mggSigHistCat5.GetEntries(), mggBkgHistCat5.GetEntries())
+    if iProc==6:
+      mggSigHistCat6.Fill(mggSig,w)
+      mggBkgHistCat6.Fill(mggBkg)
+      sigAndBkgEntries[iProc] = (mggSigHistCat6.GetEntries(), mggBkgHistCat6.GetEntries())
+    if iProc==7:
+      mggSigHistCat7.Fill(mggSig,w)
+      mggBkgHistCat7.Fill(mggSig)
+      sigAndBkgEntries[iProc] = (mggSigHistCat7.GetEntries(), mggBkgHistCat7.GetEntries())
+    if iProc==8:
+      mggSigHistCat8.Fill(mggSig,w)
+      mggBkgHistCat8.Fill(mggBkg)
+      sigAndBkgEntries[iProc] = (mggSigHistCat8.GetEntries(), mggBkgHistCat8.GetEntries())
+
+# save histo and stats for each catgeory
+f_output.Write() 
+f_output.Close()    
+with open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/debug/recoPlotsNoDiphoBDT/sigAndBkgCounts.txt','w+') as f: 
+  f.write(str(sigAndBkgEntries))
+print 'finished diphoton invariant mass plots'
+'''
+
 
 #now estimate two-class significance for the alt dipho model
 #set up parameters for the optimiser
@@ -344,6 +480,7 @@ SigStr = ''
 sigList = []
 NSignalEvents = []
 NBackgroundEvents = []
+sigSum = 0
 
 plotDir  = '%s/%s/Proc_0'%(plotDir,opts.modelName.replace('.model',''))
 if not path.isdir(plotDir): 
@@ -357,7 +494,7 @@ for iClass in range(nClasses):
   #NBackgroundEvents.append(bkgWeights.sum())
   optimiser = CatOptim(sigWeights, diphoM, [diphoPredY], bkgWeights, dataM, [dataPredY], 2, ranges, names)
   #optimiser.setTransform(True) #FIXME
-  optimiser.optimise(opts.intLumi, opts.nIterations, iClass)
+  optimiser.optimise(opts.intLumi, opts.nIterations,iClass)
   #optimiser.crossCheck(opts.intLumi,plotDir)
   printStr += 'Results for bin %g : \n'%iClass
   printStr += optimiser.getPrintableResult()
@@ -368,6 +505,7 @@ for iClass in range(nClasses):
   BDTStr += (splits[2][14:19])
   BDTStr += '\n'
   Sig = float(splits[2][-9:-3])
+  sigSum += Sig    
  
   ''' 
   # For doing lumi scaling for combined and non combined. (Just care about 2016 only for now though)
@@ -377,11 +515,11 @@ for iClass in range(nClasses):
   else:
     SigStr += '%f'%(Sig*(math.sqrt(lumiScale)))
     SigStr += '\n' 
-   '''
+  '''
 
   SigStr += '%f'%Sig
   SigStr += '\n'
-  sigList.append(Sig)
+  sigList.append(Sig) 
 
 #No bins requiring 3 cats for 1.1
 #binsRequiringThree = [0] 
@@ -400,6 +538,13 @@ for iClass in range(nClasses):
 
 print
 print printStr
+#print
+#print('Average sensitivty is:')
+#print(sigSum/nClasses)
+
+print('Accuracy is:')
+print(accuracy_score(diphoJ, diphoR, sample_weight=diphoFW))
+
 
 #print the cuts to the files for use in analysis.py later (plotting confusion matrices using these cuts)
 '''
@@ -424,69 +569,105 @@ else:
 '''
 
 
+                                  ##### Manually establish a cut for cat 6 #####
 
-#for nJet BDT options. NOTE: change this for each weight scenario you are considering
+#make a plot of AMS v.s. diphoton BDT cut for catgeory 6
+catSixHisto = r.TH1F('catSixHisto',';x;y', 100, 0.6, 1.0)
+diphoCuts = np.linspace(0.1,1,101)
+#diphoCut2 = 
+#sys.exit(1)
+
+#make dataframe containing the diphoBDT scores, and the weights for signal and background
+catSixDFSig = pd.concat([pd.DataFrame(diphoR), pd.DataFrame(diphoFW), pd.DataFrame(diphoPredY)], axis=1, ignore_index = True) 
+catSixDFSig.columns  = ['NNClass','weight','diphoBDTScore']
+catSixDFSig = catSixDFSig[catSixDFSig.NNClass==5]
+#print(catSixDFSig)
+
+catSixDFBkg = pd.concat([pd.DataFrame(dataR), pd.DataFrame(dataFW), pd.DataFrame(dataPredY)], axis=1, ignore_index = True)
+catSixDFBkg.columns  = ['NNClass','weight','diphoBDTScore']
+catSixDFBkg = catSixDFBkg[catSixDFBkg.NNClass==5]
+
+
+
+#calculate and store the AMS for different cuts: 0.6 -> 1
+#Just use one cut on the BDT for now
+for cut in diphoCuts:
+  s  = np.sum(catSixDFSig[catSixDFSig.diphoBDTScore > cut]['weight'].values)
+  b  = np.sum(catSixDFBkg[catSixDFBkg.diphoBDTScore > cut]['weight'].values)
+  print(s)
+  print(b)
+  val = 0
+  if b>0:
+    val = (s + b)*np.log(1. + (s/b))
+    val = 2*(val - s)
+    val = np.sqrt(val) 
+  print ('cut: %.3f' % cut)
+  print ('AMS: %.3f' % val)
+  print 
+
+'''
+##NN text file printing
 if opts.className:
-  if 'Jet' in opts.className:
-    BDTCutFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nJetOutputs/BDT/diphoBDTCutsWithNoWeights.txt','w+')
-    BDTCutFile.write('%s'%BDTStr)
-    BDTCutFile.close()
-    sigsCutFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nJetOutputs/BDT/catSigsWithNoWeights.txt','w+')
-    sigsCutFile.write('%s'%printStr)
-    sigsCutFile.close()
+   if 'nJetNN' in opts.className:
+     BDTCutFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nJetOutputs/NN/diphoBDTCutsNNWithNoWeights.txt','w+')
+     BDTCutFile.write('%s'%BDTStr)
+     BDTCutFile.close()
+     sigsCutFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nJetOutputs/NN/catSigsNNWithNoWeights.txt','w+')
+     sigsCutFile.write('%s'%printStr)
+     sigsCutFile.close()
 
-#same as above, but for the BDT multiclass model
-  elif 'nClasses' in opts.className:
-    BDTCutFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nClassOutputs/BDT/diphoBDTCutsWithNoWeights.txt','w+')
-    BDTCutFile.write('%s'%BDTStr)
-    BDTCutFile.close()
-    sigsCutFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nClassOutputs/BDT/catSigsNoWeights.txt','w+')
-    sigsCutFile.write('%s'%printStr)
-    sigsCutFile.close()
+  # same thing but for multicat NN
+   elif 'nClassesNN' in opts.className:
+     BDTCutFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nClassOutputs/NN/diphoBDTCutsNNWithMCWeights.txt','w+')
+     BDTCutFile.write('%s'%BDTStr)
+     BDTCutFile.close()
+     sigsCutFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nClassOutputs/NN/catSigsNNWithMCWeights.txt','w+')
+     sigsCutFile.write('%s'%printStr)
+     sigsCutFile.close()
 
 else: #reco
-    BDTCutFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/reco/diphoBDTCutsReco.txt','w+')
-    BDTCutFile.write('%s'%BDTStr)
-    BDTCutFile.close()
-    sigsCutFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/reco/catSigsReco.txt','w+')
-    sigsCutFile.write('%s'%printStr)
-    sigsCutFile.close()
+   BDTCutFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/debug/recoPlotsWithFits/diphoBDTCutsReco.txt','w+')
+   BDTCutFile.write('%s'%BDTStr)
+   BDTCutFile.close()
+   sigsCutFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/debug/recoPlotsWithFits/catSigsReco.txt','w+')
+   sigsCutFile.write('%s'%printStr)
+   sigsCutFile.close()
+'''
 
-
-##### Plot purity matrices #####
-#Here, we dont have reco cats for ggH vbf-like events, but we do get allow gen level contamination
-#of the vbf-like events into the ggH reco categories
-
-
+                               ##### Plot confusion matrices #####
 #NB diphoJ = Truth, diphoR = Cat from either reco or ML
 
 #declare 2D hists
-nBinsX=nClasses+1 #include the ggh VBF-like procs
-nBinsY=nClasses 
-procHistReco = r.TH2F('procHistReco',';;;Signal composiion (%)', nBinsX, -0.5, nBinsX-0.5, nBinsY, -0.5, nBinsY-0.5)
+nBinsX=nClasses+1 #include the ggH VBF-like procs that we later lump into one bin
+nBinsY=nClasses
+procHistReco = r.TH2F('procHistReco',';;;Signal composition (%)', nBinsX, -0.5, nBinsX-0.5, nBinsY, -0.5, nBinsY-0.5)
 procHistReco.SetTitle('')
 prettyHist(procHistReco)
-procHistPred = r.TH2F('procHistPred','procHistPred', nBinsX, -0.5, nBinsX-0.5, nBinsY, -0.5, nBinsY-0.5)
+procHistPred = r.TH2F('procHistPred',';;;Signal composition (%)', nBinsX, -0.5, nBinsX-0.5, nBinsY, -0.5, nBinsY-0.5)
 procHistPred.SetTitle('')
 prettyHist(procHistPred)
 catHistReco  = r.TH2F('catHistReco',';;;Signal composition (%)', nBinsX, -0.5, nBinsX-0.5, nBinsY, -0.5, nBinsY-0.5)
 catHistReco.SetTitle('')
 prettyHist(catHistReco)
-catHistPred  = r.TH2F('catHistPred','catHistPred', nBinsX, -0.5, nBinsX-0.5, nBinsY, -0.5, nBinsY-0.5)
+catHistPred  = r.TH2F('catHistPred',';;;Signal composition (%)', nBinsX, -0.5, nBinsX-0.5, nBinsY, -0.5, nBinsY-0.5)
 catHistPred.SetTitle('')
 prettyHist(catHistPred)
 
 #generate weights for the 2D hists   
+#note that if you have used BDT or NN in cats, then diphoR is from there, rather than reco
 
-#lump all the VBF-like procs into one by at generator level, for aesthetic
+ 
+#lump all the vbf-like procs in one bin by modifying proc dataframe (just for gen level though)
 diphoJ[diphoJ > 8] = 9
 
 #Sum weights for each bin i.e. column, in first for loop. Store in dict.
-#Then sum weights for each (bin,cat) pair. Store in dict as,
+#Then sum weights for each (X-bin,Y-cat) pair. Store in dict as,
+
 sumwProcMap = {}
 sumwProcCatMapReco = {}
 sumwProcCatMapPred = {}
-for iProc in range(nClasses+1):
+for iProc in range(nClasses+1): #add for the vbf-like procs 
+    #sum columns/procs for normalisation later
     sumwProcMap[iProc] = np.sum(diphoFW*(diphoJ==iProc))
     for jProc in range(nClasses):
         sumwProcCatMapReco[(iProc,jProc)] = np.sum(diphoFW*(diphoJ==iProc)*(diphoR==jProc))
@@ -495,7 +676,8 @@ for iProc in range(nClasses+1):
 #Sum weights for entire predicted catgeory i.e. row for BDT pred cat and Reco cat
 sumwCatMapReco = {}
 sumwCatMapPred = {}
-for iProc in range(nClasses): 
+for iProc in range(nClasses):
+    #sum cats for normalisation along rows
     sumwCatMapReco[iProc] = np.sum(diphoFW*(diphoR==iProc))
 
 #Set 2D hist axis/bin labels
@@ -514,16 +696,16 @@ for iBin in range(nClasses+1):
 
 for iBin in range(nClasses):
     procHistReco.GetYaxis().SetBinLabel( iBin+1, catNames[iBin] )
-    procHistReco.GetYaxis().SetTitle('Event Category')
+    procHistReco.GetYaxis().SetTitle('Event category')
 
     procHistPred.GetYaxis().SetBinLabel( iBin+1, catNames[iBin] )
-    procHistPred.GetYaxis().SetTitle('Event Category')
+    procHistPred.GetYaxis().SetTitle('Event category')
 
     catHistReco.GetYaxis().SetBinLabel( iBin+1, catNames[iBin] )
-    catHistReco.GetYaxis().SetTitle('Event Category')
+    catHistReco.GetYaxis().SetTitle('Event category')
 
     catHistPred.GetYaxis().SetBinLabel( iBin+1, catNames[iBin] )
-    catHistPred.GetYaxis().SetTitle('Event Category')
+    catHistPred.GetYaxis().SetTitle('Event category')
 
 #Set up color pallete and other canvas options
 npoints = 2
@@ -546,12 +728,11 @@ r.gStyle.SetNumberContours(256)
 #Fill 2D hists with percentage of events
 for iProc in range(nClasses+1):
     for jProc in range(nClasses):
-        #Indiv bin entries for reco and pred, normalised by sum of bin i.e. sum of col
         procWeightReco = 100. * sumwProcCatMapReco[(iProc,jProc)] / sumwProcMap[iProc]
-        if procWeightReco < 0.5: procWeightReco=-1 
-        #Indiv bin entries for reco and pred normalised to sum of cat i.e. sum of row
+        if procWeightReco < 0.5: procWeightReco=-1
+
         catWeightReco  = 100. * sumwProcCatMapReco[(iProc,jProc)] / sumwCatMapReco[jProc]
-        if catWeightReco < 0.5: catWeightReco=-1 
+        if catWeightReco < 0.5: catWeightReco=-1
 
         procHistReco.Fill(iProc, jProc, procWeightReco)
         catHistReco.Fill(iProc, jProc, catWeightReco)
@@ -580,15 +761,16 @@ catHistReco.SetMinimum(0)
 useSty.drawCMS(onTop=True)
 useSty.drawEnPu(lumi='35.9 fb^{-1} (2016)')
 
-
+'''
 #NOTE: will need to change this for each weight scenario
 if opts.className:
-  if 'Jet' in opts.className:
-    canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nJetOutputs/BDT/nJetBDTPurityMatrixDataSigsNoWeights.pdf')
+  if 'nJetNN' in opts.className:
+    canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nJetOutputs/NN/nJetNNPurityMatrixDataSigsNoWeights.pdf')
   elif 'nClass' in opts.className:
-    canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nClassOutputs/BDT/nClassBDTPurityMatrixDataSigsNoWeights.pdf')
+    canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nClassOutputs/NN/nClassNNPurityMatrixDataSigsMCWeights.pdf')
 else: #reco
-    canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/reco/PurityMatrixDataSigsReco.pdf')
+    canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/debug/recoPlotsWithFits/purityMatrixReco.pdf')
+'''
 
 canv = r.TCanvas()
 canv.SetRightMargin(0.15)
@@ -615,19 +797,20 @@ procHistReco.SetMinimum(0)
 useSty.drawCMS(onTop=True)
 useSty.drawEnPu(lumi='35.9 fb^{-1} (2016)')
 
+'''
 #NOTE: will need to change this for each weight scenario
 if opts.className:
-  if 'Jet' in opts.className:
-    canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nJetOutputs/BDT/nJetBDTPurityMatrixDataSigsNoWeightsNormByProc.pdf')
+  if 'nJetNN' in opts.className:
+    canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nJetOutputs/NN/nJetNNPurityMatrixDataSigsNoWeightsNormByProc.pdf')
   elif 'nClass' in opts.className:
-    canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nClassOutputs/BDT/nClassBDTPurityMatrixDataSigsNoWeightNormByProc.pdf')
+    canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nClassOutputs/NN/nClassNNPurityMatrixDataSigsMCWeightsNormByProc.pdf')
 else: #reco
-    canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/reco/PurityMatrixDataSigsRecoNormByProc.pdf')
+    canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/debug/recoPlotsWithFits/purityMatrixNormByProcReco.pdf')
+'''
 
-
-##### make sig radar plots #####
+                                 ##### make sig radar plots #####
 sigArrayBDT  = sigList
-sigArrayReco = [2.278, 5.535, 2.215, 2.678, 1.513, 2.444, 1.552, 2.464, 3.838]
+sigArrayReco = [2.278, 5.535, 2.215, 2.678, 1.513, 2.444, 1.552, 2.464, 3.838]                                  
 
 df = pd.DataFrame({
     'group':['BDT','Reco'],
@@ -663,7 +846,7 @@ plt.xticks(angles[:-1], categories, color='grey', size=12)
  
 # Draw ylabels
 ax.set_rlabel_position(0)
-plt.yticks([0,1,2,3,4,5,6], ["0","1","2","3","4","5",""], color="grey", size=10)
+plt.yticks([0,1,2,3,4,5,6], ["0","1","2","3","4","5",""], color="grey", size=7)
 plt.ylim(0,6)
  
   
@@ -671,7 +854,7 @@ plt.ylim(0,6)
 #NN
 values=df.loc[0].drop('group').values.flatten().tolist()
 values += values[:1]
-ax.plot(angles, values, linewidth=1, linestyle='solid', label="STXS bin BDT", color='g')
+ax.plot(angles, values, linewidth=1, linestyle='solid', label="STXS bin NN", color='b')
 ax.fill(angles, values, 'b', alpha=0.1)
  
 # Reco
@@ -679,15 +862,57 @@ values=df.loc[1].drop('group').values.flatten().tolist()
 values += values[:1]
 ax.plot(angles, values, linewidth=1, linestyle='solid', label="Reco", color='r')
 ax.fill(angles, values, 'r', alpha=0.1)
- 
+
 # Add legend
 plt.legend(loc='upper right', bbox_to_anchor=(0.18, 0.04))
 plt.show()
 #NOTE: will need to change this for each weight scenario
-if opts.className:
-  if 'Jet' in opts.className:
-    plt.savefig('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nJetOutputs/BDT/nJetBDTSigsPlotNoWeights.pdf')
-  elif 'nClass' in opts.className:
-    plt.savefig('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nClassOutputs/BDT/nClassBDTSigsPlotNoWeights.pdf')
-else: #reco
-  plt.savefig('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/reco/SigsPlotReco.pdf')
+#if opts.className:
+#  if 'nJetNN' in opts.className:
+#    plt.savefig('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nJetOutputs/NN/nJetNNSigsPlotNoWeights.pdf')
+#  elif 'nClass' in opts.className:
+#    plt.savefig('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nClassOutputs/NN/nClassBDTSigsPlotMCWeights.pdf')
+#else: #reco
+#  plt.savefig('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/debug/recoPlotsWithFits/SigsPlotReco.pdf')  
+
+                               ##### plot category efficiencies as radar plot #####
+#remove the vbf-like EVENTS (not just numbers, which happens if using logic masks on numpy arrays)
+# i.e. doing: diphoYDebug = diphoJ[diphoJ < 9] will  make all efficiencies way too low...
+
+trainTotal = trainTotal[trainTotal.truthClass < 9]
+trueClass  = trainTotal['truthClass'].values
+recoClass  = trainTotal['reco'].values
+weights    = trainTotal['weight'].values
+
+#NN:
+
+
+#reco:
+#Create and fill correct and incorrect dicts
+correctDict   = {0:[],1:[],2:[],3:[],4:[],5:[],6:[],7:[],8:[]}
+incorrectDict = {0:[],1:[],2:[],3:[],4:[],5:[],6:[],7:[],8:[]}
+
+for true, guess, weight in zip(trueClass, recoClass, weights):
+  if true==guess:
+    correctDict[true].append(weight)
+  else:
+    incorrectDict[true].append(weight)
+
+correctList   = []
+incorrectList = []
+
+#sum the weights in the dict for each cat
+for iCat in range(len(correctDict.keys())):
+  correctList.append(sum(correctDict[iCat]))
+  incorrectList.append(sum(incorrectDict[iCat]))
+
+#convert to numpy for pyplot
+correctArray   = np.asarray(correctList)
+incorrectArray = np.asarray(incorrectList)
+
+effArrayReco = correctArray/(correctArray+incorrectArray)
+print('reco Effs are:')
+print(effArrayReco)
+print('\nAverage Reco eff is: %f'%effArrayReco.mean())
+
+

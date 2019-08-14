@@ -5,6 +5,10 @@ r.gROOT.SetBatch(True)
 from root_numpy import fill_hist
 import usefulStyle as useSty
 
+plotDir = '/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/debug/nJetNNMgamgamWITHDiphotBDT'
+#plotDir = '/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/debug/recoPlotsWithFits'
+
+f_output = r.TFile.Open("DEBUGhist.root","RECREATE") 
 
 class Bests:
   '''Class to store and update best values during a category optimisation'''
@@ -136,7 +140,7 @@ class CatOptim:
     arr = 1. / ( 1. + np.exp( 0.5*np.log( 2./(arr+1.) - 1. ) ) )
     return arr
 
-  def optimise(self, lumi, nIters):
+  def optimise(self, lumi, nIters, classNo):
     '''Run the optimisation for a given number of iterations'''
     for iIter in range(nIters):
       cuts = od()
@@ -170,10 +174,14 @@ class CatOptim:
         sigHist = r.TH1F('sigHistTemp','sigHistTemp',160,100,180)
         fill_hist(sigHist, self.sigMass, weights=sigWeights)
         sigCount = 0.68 * lumi * sigHist.Integral() 
-        sigWidth = self.getRealSigma(sigHist)
+        sigDict = self.getRealSigma(sigHist) # return sigma and histo with fit
+        sigWidth = sigDict['sigma']
+        sigHist  = sigDict['sigHistFit'] #update signal histogram to include fit
         bkgHist = r.TH1F('bkgHistTemp','bkgHistTemp',160,100,180)
         fill_hist(bkgHist, self.bkgMass, weights=bkgWeights)
-        bkgCount = self.computeBkg(bkgHist, sigWidth)
+        bkgDict = self.computeBkg(bkgHist, sigWidth) #return bkg histogram with fit
+        bkgCount = bkgDict['bkgCounts']
+        bkgHist  = bkgDict['bkgHistoFit'] #update bkg hist to include fit
         if self.addNonSig:
           nonSigHist = r.TH1F('nonSigHistTemp','nonSigHistTemp',160,100,180)
           fill_hist(nonSigHist, self.nonSigMass, weights=nonSigWeights)
@@ -184,6 +192,16 @@ class CatOptim:
         bkgs.append(bkgCount)
         nons.append(nonSigCount)
       if self.bests.update(sigs, bkgs, nons):
+        #DEBUG: print best fits
+        #r.gStyle.SetOptStat(1111)
+        #canv = r.TCanvas()
+        #sigHist.Draw()
+        #canv.Print('%s/signalHistCat%i.pdf' % (plotDir,classNo)) #will overwrite until best is stored
+        #bkgHist.Draw()
+        #canv.Print('%s/backgroundHistCat%i.pdf' % (plotDir,classNo)) #will overwrite until best is stored
+        #with open('%s/fitInfoCat%i.txt' %(plotDir,classNo),'w+') as f: 
+        #  f.write('Info: \n sigWidth: %.2f \n signal: %.6f \n background: %.6f'%(sigWidth,sigCount,bkgCount))  
+        #end of debug
         for name in self.names:
           self.boundaries[name] = cuts[name]
 
@@ -219,7 +237,7 @@ class CatOptim:
             sigHist = r.TH1F('sigHistTemp','sigHistTemp',160,100,180)
             fill_hist(sigHist, self.sigMass, weights=sigWeights)
             sigCount = 0.68 * lumi * sigHist.Integral() 
-            sigWidth = self.getRealSigma(sigHist)
+            sigWidth = self.getRealSigma(sigHist) 
             bkgHist = r.TH1F('bkgHistTemp','bkgHistTemp',160,100,180)
             fill_hist(bkgHist, self.bkgMass, weights=bkgWeights)
             bkgCount = self.computeBkg(bkgHist, sigWidth) #fits exp to BG integrates between 125+/-sigma 
@@ -250,7 +268,7 @@ class CatOptim:
 
   def getBests(self):
     return self.bests
-
+ 
   def getPrintableResult(self):
     printStr = ''
     for iCat in reversed(range(self.nCats)):
@@ -266,20 +284,26 @@ class CatOptim:
 
   def getRealSigma( self, hist ):
     sigma = 2.
+    sigFitDict = {}
     if hist.GetEntries() > 0 and hist.Integral()>0.000001:
       hist.Fit('gaus')
       fit = hist.GetFunction('gaus')
       sigma = fit.GetParameter(2)
-    return sigma
+    sigFitDict['sigma'] = sigma 
+    sigFitDict['sigHistFit'] = hist #note if no fit done, just return old hist
+    return sigFitDict
   
   def computeBkg( self, hist, effSigma ):
     bkgVal = 9999.
-    #if hist.GetEntries() > 0 and hist.Integral()>0.000001:
+    bkgFitDict = {}
+    #if hist.GetEntries() > 10 and hist.Integral()>0.000001: #previous
     if hist.GetEffectiveEntries() > 10 and hist.Integral()>0.000001:
       hist.Fit('expo')
       fit = hist.GetFunction('expo')
       bkgVal = fit.Integral(125. - effSigma, 125. + effSigma)
-    return bkgVal
+    bkgFitDict['bkgCounts'] = bkgVal
+    bkgFitDict['bkgHistoFit'] = hist
+    return bkgFitDict
 
   def getAMS(self, s, b, breg=3.):
     b = b + breg

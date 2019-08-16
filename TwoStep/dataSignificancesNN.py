@@ -27,7 +27,7 @@ import usefulStyle as useSty
 
 #save m_diphoton plots here
 #f_output = r.TFile.Open("/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/debug/nJetNNMgamgamNoDiphotBDT/diphotonMassHistos.root","RECREATE")
-f_output = r.TFile.Open("/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/debug/recoPlotsNoDiphoBDT/diphotonMassHistosNoDiphoBDTCut.root","RECREATE")
+f_output = r.TFile.Open("/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/debug/cat6.root","RECREATE")
 #f_output_withBDT = r.TFile.Open("/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/debug/nJetNNMgamgamWITHDiphotBDT/diphotonMassHistos.root","RECREATE")
 
 #configure options
@@ -496,30 +496,36 @@ for iClass in range(nClasses):
   #optimiser.setTransform(True) #FIXME
   optimiser.optimise(opts.intLumi, opts.nIterations,iClass)
   #optimiser.crossCheck(opts.intLumi,plotDir)
-  printStr += 'Results for bin %g : \n'%iClass
-  printStr += optimiser.getPrintableResult()
-  toPrint = optimiser.getPrintableResult()
-  splits = toPrint.split(':')
-  BDTStr += (splits[1][14:19])
-  BDTStr += '\n'
-  BDTStr += (splits[2][14:19])
-  BDTStr += '\n'
-  Sig = float(splits[2][-9:-3])
-  sigSum += Sig    
+  if(iClass!=5):
+    printStr += 'Results for bin %g : \n'%iClass
+    printStr += optimiser.getPrintableResult(iClass)
+    toPrint = optimiser.getPrintableResult(iClass)
+    splits = toPrint.split(':')
+    BDTStr += (splits[1][14:19])
+    BDTStr += '\n'
+    BDTStr += (splits[2][14:19])
+    BDTStr += '\n'
+    Sig = float(splits[2][-9:-3])
+    sigSum += Sig    
  
-  ''' 
-  # For doing lumi scaling for combined and non combined. (Just care about 2016 only for now though)
-  if(scaleToLumi == True):
+    ''' 
+    # For doing lumi scaling for combined and non combined. (Just care about 2016 only for now though)
+    if(scaleToLumi == True):
+      SigStr += '%f'%Sig
+      SigStr += '\n'
+    else:
+      SigStr += '%f'%(Sig*(math.sqrt(lumiScale)))
+      SigStr += '\n' 
+    '''
+
     SigStr += '%f'%Sig
     SigStr += '\n'
+    sigList.append(Sig) 
   else:
-    SigStr += '%f'%(Sig*(math.sqrt(lumiScale)))
-    SigStr += '\n' 
-  '''
-
-  SigStr += '%f'%Sig
-  SigStr += '\n'
-  sigList.append(Sig) 
+    #get the string containing the dict and convert back to dict
+    
+    cat6Info = optimiser.getPrintableResult(iClass) 
+    sigList.append(0)
 
 #No bins requiring 3 cats for 1.1
 #binsRequiringThree = [0] 
@@ -569,42 +575,6 @@ else:
 '''
 
 
-                                  ##### Manually establish a cut for cat 6 #####
-
-#make a plot of AMS v.s. diphoton BDT cut for catgeory 6
-catSixHisto = r.TH1F('catSixHisto',';x;y', 100, 0.6, 1.0)
-diphoCuts = np.linspace(0.1,1,101)
-#diphoCut2 = 
-#sys.exit(1)
-
-#make dataframe containing the diphoBDT scores, and the weights for signal and background
-catSixDFSig = pd.concat([pd.DataFrame(diphoR), pd.DataFrame(diphoFW), pd.DataFrame(diphoPredY)], axis=1, ignore_index = True) 
-catSixDFSig.columns  = ['NNClass','weight','diphoBDTScore']
-catSixDFSig = catSixDFSig[catSixDFSig.NNClass==5]
-#print(catSixDFSig)
-
-catSixDFBkg = pd.concat([pd.DataFrame(dataR), pd.DataFrame(dataFW), pd.DataFrame(dataPredY)], axis=1, ignore_index = True)
-catSixDFBkg.columns  = ['NNClass','weight','diphoBDTScore']
-catSixDFBkg = catSixDFBkg[catSixDFBkg.NNClass==5]
-
-
-
-#calculate and store the AMS for different cuts: 0.6 -> 1
-#Just use one cut on the BDT for now
-for cut in diphoCuts:
-  s  = np.sum(catSixDFSig[catSixDFSig.diphoBDTScore > cut]['weight'].values)
-  b  = np.sum(catSixDFBkg[catSixDFBkg.diphoBDTScore > cut]['weight'].values)
-  print(s)
-  print(b)
-  val = 0
-  if b>0:
-    val = (s + b)*np.log(1. + (s/b))
-    val = 2*(val - s)
-    val = np.sqrt(val) 
-  print ('cut: %.3f' % cut)
-  print ('AMS: %.3f' % val)
-  print 
-
 '''
 ##NN text file printing
 if opts.className:
@@ -634,7 +604,58 @@ else: #reco
    sigsCutFile.close()
 '''
 
-                               ##### Plot confusion matrices #####
+#Set up color pallete and other canvas options
+npoints = 2
+stops = [0.00,1.00]
+red = [1.00, 0.50]
+green = [1.00, 0.00]
+blue = [1.00, 0.70]
+ncontours = 256
+alpha=1.
+
+stops = array('d',stops)
+red = array('d',red)
+green = array('d',green)
+blue = array('d',blue)
+
+r.TColor.CreateGradientColorTable(npoints, stops, red, green, blue, ncontours, alpha)
+r.gStyle.SetNumberContours(256)
+
+                               ##### Plot cat 6 stuff #####
+cat6HistDiphoCuts = r.TH2F('histo', ';;;Combined AMS value', 101, 0.5, 1.0, 101, 0.5, 1.0)
+cut1, cut2 = zip(*cat6Info)
+AMS = cat6Info.values()
+for iCut1, iCut2, iAMS in zip(cut1, cut2, AMS):
+  cat6HistDiphoCuts.Fill(iCut1, iCut2, iAMS)
+
+#draw and save the 2D hists
+canv = r.TCanvas()
+canv.SetRightMargin(0.15)
+canv.SetLeftMargin(0.12)
+canv.SetBottomMargin(0.12)
+canv.SetRightMargin(0.15)
+cat6HistDiphoCuts.Draw('COLZ')
+cat6HistDiphoCuts.GetXaxis().SetTitleOffset(1.4)
+cat6HistDiphoCuts.GetXaxis().SetTitle('Diphoton BDT cut 1')
+cat6HistDiphoCuts.GetYaxis().SetTitle('Diphoton BDT cut 2')
+cat6HistDiphoCuts.GetYaxis().SetTitleOffset(1.4)
+cat6HistDiphoCuts.GetZaxis().SetTitleOffset(1.2)
+useSty.drawCMS(onTop=True)
+useSty.drawEnPu(lumi='35.9 fb^{-1} (2016)')
+canv.Print("/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nClassOutputs/NN/cat62DScanNNMCWeightsExamplePlot.pdf")
+#sys.exit(1)
+
+#cat6Graph = r.TGraph(len(cat6Info), array('d', cat6Info.keys()), array('d', cat6Info.values()) )
+#cat6Graph.Draw('AP')
+#cat6Graph.SetTitle(';DiphotonBDT cut; Category Significance')
+#cat6Graph.SetMarkerStyle(7)
+##cat6Graph.SetMarkerSize(2)
+#useSty.drawCMS(onTop=True)
+#useSty.drawEnPu(lumi='35.9 fb^{-1} (2016)')
+#canv.Print("/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/cat6.png")
+
+
+                      ##### Plot confusion matrices #####
 #NB diphoJ = Truth, diphoR = Cat from either reco or ML
 
 #declare 2D hists

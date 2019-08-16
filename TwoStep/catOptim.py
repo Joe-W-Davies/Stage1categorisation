@@ -1,6 +1,7 @@
 from collections import OrderedDict as od
 import numpy as np
 import ROOT as r
+import json
 r.gROOT.SetBatch(True)
 from root_numpy import fill_hist
 import usefulStyle as useSty
@@ -99,6 +100,7 @@ class CatOptim:
     self.bkgMass       = bkgMass
     self.nonSigWeights = None
     self.nonSigMass    = None
+    self.cat6AMS       = {}
     self.nCats         = int(nCats)
     self.bests         = Bests(self.nCats)
     self.sortOthers    = False
@@ -157,53 +159,103 @@ class CatOptim:
       sigs = []
       bkgs = []
       nons = []
-      for iCat in range(self.nCats): #number of sub-cats we are splitting the cat into
-        lastCat = (iCat+1 == self.nCats) #boolean, set to true if on last cat
+      if classNo==5: #do class 5 manually (print out some values)
+        diphoCuts1 = np.linspace(0.5,1,101) #higher cut. nominally: (0.5,1,101)
+        diphoCuts2 = np.linspace(0.5,1,101) #lower cut. nominally: (0.5,1,101)
         sigWeights = self.sigWeights
         bkgWeights = self.bkgWeights
-        if self.addNonSig: nonSigWeights = self.nonSigWeights
-        for iName,name in enumerate(self.names):
-          sigWeights = sigWeights * (self.sigDiscrims[name]>cuts[name][iCat])
-          bkgWeights = bkgWeights * (self.bkgDiscrims[name]>cuts[name][iCat])
-          if self.addNonSig: nonSigWeights = nonSigWeights * (self.nonSigDiscrims[name]>cuts[name][iCat])
-          if not lastCat:
-            if iName==0 or self.sortOthers:
-              sigWeights = sigWeights * (self.sigDiscrims[name]<cuts[name][iCat+1])
-              bkgWeights = bkgWeights * (self.bkgDiscrims[name]<cuts[name][iCat+1])
-              if self.addNonSig: nonSigWeights = nonSigWeights * (self.nonSigDiscrims[name]<cuts[name][iCat+1])
-        sigHist = r.TH1F('sigHistTemp','sigHistTemp',160,100,180)
-        fill_hist(sigHist, self.sigMass, weights=sigWeights)
-        sigCount = 0.68 * lumi * sigHist.Integral() 
-        sigDict = self.getRealSigma(sigHist) # return sigma and histo with fit
-        sigWidth = sigDict['sigma']
-        sigHist  = sigDict['sigHistFit'] #update signal histogram to include fit
-        bkgHist = r.TH1F('bkgHistTemp','bkgHistTemp',160,100,180)
-        fill_hist(bkgHist, self.bkgMass, weights=bkgWeights)
-        bkgDict = self.computeBkg(bkgHist, sigWidth) #return bkg histogram with fit
-        bkgCount = bkgDict['bkgCounts']
-        bkgHist  = bkgDict['bkgHistoFit'] #update bkg hist to include fit
-        if self.addNonSig:
-          nonSigHist = r.TH1F('nonSigHistTemp','nonSigHistTemp',160,100,180)
-          fill_hist(nonSigHist, self.nonSigMass, weights=nonSigWeights)
-          nonSigCount = 0.68 * lumi * nonSigHist.Integral() 
-        else:
-          nonSigCount = 0.
-        sigs.append(sigCount)
-        bkgs.append(bkgCount)
-        nons.append(nonSigCount)
-      if self.bests.update(sigs, bkgs, nons):
-        #DEBUG: print best fits
-        #r.gStyle.SetOptStat(1111)
-        #canv = r.TCanvas()
-        #sigHist.Draw()
-        #canv.Print('%s/signalHistCat%i.pdf' % (plotDir,classNo)) #will overwrite until best is stored
-        #bkgHist.Draw()
-        #canv.Print('%s/backgroundHistCat%i.pdf' % (plotDir,classNo)) #will overwrite until best is stored
-        #with open('%s/fitInfoCat%i.txt' %(plotDir,classNo),'w+') as f: 
-        #  f.write('Info: \n sigWidth: %.2f \n signal: %.6f \n background: %.6f'%(sigWidth,sigCount,bkgCount))  
-        #end of debug
-        for name in self.names:
-          self.boundaries[name] = cuts[name]
+        for diphoCut1 in diphoCuts1: #upper category
+          sigWeightTemp1 = sigWeights * (self.sigDiscrims[name]>diphoCut1) 
+          bkgWeightTemp1 = bkgWeights * (self.bkgDiscrims[name]>diphoCut1) 
+          for diphoCut2 in diphoCuts2: #lower category
+            sigWeightTemp2 = sigWeights * (self.sigDiscrims[name]<diphoCut1) * (self.sigDiscrims[name]>diphoCut2)
+            bkgWeightTemp2 = bkgWeights * (self.bkgDiscrims[name]<diphoCut1) * (self.bkgDiscrims[name]>diphoCut2)
+            #calculate efficiencies for each of the two signal and BG sets then combine in quadrature
+            #cut 1 and upward
+            if diphoCut1>diphoCut2 : #makes no sense if diphoCut2>diphoCut1 
+              sigHist = r.TH1F('sigHistTemp','sigHistTemp',160,100,180)
+              fill_hist(sigHist, self.sigMass, weights=sigWeightTemp1)
+              sigCount = 0.68 * lumi * sigHist.Integral() 
+              sigDict = self.getRealSigma(sigHist) # return sigma and histo with fit
+              sigWidth = sigDict['sigma']
+              bkgHist = r.TH1F('bkgHistTemp','bkgHistTemp',160,100,180)
+              fill_hist(bkgHist, self.bkgMass, weights=bkgWeightTemp1)
+              bkgDict = self.computeBkg(bkgHist, sigWidth) #return bkg histogram with fit
+              bkgCount = bkgDict['bkgCounts']
+              AMSupper = self.getAMS(sigCount, bkgCount)
+              #print('cut 1: %.4f' % diphoCut1)
+              #print('sig count %.4f' % sigCount)
+              #print('bkg count %.4f' % bkgCount)
+              #print('AMS upper: %.4f' % AMSupper)
+
+              #higher than cut 2, lower than cut 1
+              sigHist = r.TH1F('sigHistTemp','sigHistTemp',160,100,180)
+              fill_hist(sigHist, self.sigMass, weights=sigWeightTemp2)
+              sigCount = 0.68 * lumi * sigHist.Integral() 
+              sigDict = self.getRealSigma(sigHist) # return sigma and histo with fit
+              sigWidth = sigDict['sigma']
+              bkgHist = r.TH1F('bkgHistTemp','bkgHistTemp',160,100,180)
+              fill_hist(bkgHist, self.bkgMass, weights=bkgWeightTemp2)
+              bkgDict = self.computeBkg(bkgHist, sigWidth) #return bkg histogram with fit
+              bkgCount = bkgDict['bkgCounts']
+              AMSlower = self.getAMS(sigCount, bkgCount)
+              #print('cut 2: %.4f' % diphoCut2)
+              #print('sig count %.4f' % sigCount)
+              #print('bkg count %.4f' % bkgCount)
+              #print('AMS lower: %.4f' % AMSlower)
+              
+              #fill dict iwth {(cut1, cut2) = AMS}
+              AMStot = (((AMSupper)**2) + ((AMSlower)**2))**(1./2.)
+              self.cat6AMS[(diphoCut1, diphoCut2)] = AMStot
+              #print('total AMS %.3f' % AMStot)
+      else:
+       for iCat in range(self.nCats): #number of sub-cats we are splitting the cat into
+         lastCat = (iCat+1 == self.nCats) #boolean, set to true if on last cat
+         sigWeights = self.sigWeights
+         bkgWeights = self.bkgWeights
+         if self.addNonSig: nonSigWeights = self.nonSigWeights
+         for iName,name in enumerate(self.names):
+           sigWeights = sigWeights * (self.sigDiscrims[name]>cuts[name][iCat])
+           bkgWeights = bkgWeights * (self.bkgDiscrims[name]>cuts[name][iCat])
+           if self.addNonSig: nonSigWeights = nonSigWeights * (self.nonSigDiscrims[name]>cuts[name][iCat])
+           if not lastCat:
+             if iName==0 or self.sortOthers:
+               sigWeights = sigWeights * (self.sigDiscrims[name]<cuts[name][iCat+1])
+               bkgWeights = bkgWeights * (self.bkgDiscrims[name]<cuts[name][iCat+1])
+               if self.addNonSig: nonSigWeights = nonSigWeights * (self.nonSigDiscrims[name]<cuts[name][iCat+1])
+         sigHist = r.TH1F('sigHistTemp','sigHistTemp',160,100,180)
+         fill_hist(sigHist, self.sigMass, weights=sigWeights)
+         sigCount = 0.68 * lumi * sigHist.Integral() 
+         sigDict = self.getRealSigma(sigHist) # return sigma and histo with fit
+         sigWidth = sigDict['sigma']
+         sigHist  = sigDict['sigHistFit'] #update signal histogram to include fit
+         bkgHist = r.TH1F('bkgHistTemp','bkgHistTemp',160,100,180)
+         fill_hist(bkgHist, self.bkgMass, weights=bkgWeights)
+         bkgDict = self.computeBkg(bkgHist, sigWidth) #return bkg histogram with fit
+         bkgCount = bkgDict['bkgCounts']
+         bkgHist  = bkgDict['bkgHistoFit'] #update bkg hist to include fit
+         if self.addNonSig:
+           nonSigHist = r.TH1F('nonSigHistTemp','nonSigHistTemp',160,100,180)
+           fill_hist(nonSigHist, self.nonSigMass, weights=nonSigWeights)
+           nonSigCount = 0.68 * lumi * nonSigHist.Integral() 
+         else:
+           nonSigCount = 0.
+         sigs.append(sigCount)
+         bkgs.append(bkgCount)
+         nons.append(nonSigCount)
+       if self.bests.update(sigs, bkgs, nons):
+         #DEBUG: print best fits
+         #r.gStyle.SetOptStat(1111)
+         #canv = r.TCanvas()
+         #sigHist.Draw()
+         #canv.Print('%s/signalHistCat%i.pdf' % (plotDir,classNo)) #will overwrite until best is stored
+         #bkgHist.Draw()
+         #canv.Print('%s/backgroundHistCat%i.pdf' % (plotDir,classNo)) #will overwrite until best is stored
+         #with open('%s/fitInfoCat%i.txt' %(plotDir,classNo),'w+') as f: 
+         #  f.write('Info: \n sigWidth: %.2f \n signal: %.6f \n background: %.6f'%(sigWidth,sigCount,bkgCount))  
+         #end of debug
+         for name in self.names:
+           self.boundaries[name] = cuts[name]
 
   def crossCheck(self, lumi, plotDir):
     '''Run a check to ensure the random search found a good mimimum'''
@@ -269,18 +321,23 @@ class CatOptim:
   def getBests(self):
     return self.bests
  
-  def getPrintableResult(self):
+  def getPrintableResult(self, iClass):
     printStr = ''
-    for iCat in reversed(range(self.nCats)):
-      catNum = self.nCats - (iCat+1)
-      printStr += 'Category %g optimal cuts are:  '%catNum
-      for name in self.names:
-        printStr += '%s %1.3f,  '%(name, self.boundaries[name][iCat])
-      printStr = printStr[:-3]
-      printStr += '\n'
-      printStr += 'With  S %1.3f,  B %1.3f + %1.3f,  signif = %1.3f \n'%(self.bests.sigs[iCat], self.bests.bkgs[iCat], self.bests.nons[iCat], self.bests.signifs[iCat])
-    printStr += 'Corresponding to a total significance of  %1.3f \n\n'%self.bests.totSignif
-    return printStr
+    catNum = self.nCats
+    if iClass == 5:
+      printStr += str(self.cat6AMS)
+      return self.cat6AMS
+    else:
+      for iCat in reversed(range(self.nCats)):
+        catNum = self.nCats - (iCat+1)
+        printStr += 'Category %g optimal cuts are:  '%catNum
+        for name in self.names:
+          printStr += '%s %1.3f,  '%(name, self.boundaries[name][iCat])
+        printStr = printStr[:-3]
+        printStr += '\n'
+        printStr += 'With  S %1.3f,  B %1.3f + %1.3f,  signif = %1.3f \n'%(self.bests.sigs[iCat], self.bests.bkgs[iCat], self.bests.nons[iCat], self.bests.signifs[iCat])
+      printStr += 'Corresponding to a total significance of  %1.3f \n\n'%self.bests.totSignif
+      return printStr
 
   def getRealSigma( self, hist ):
     sigma = 2.

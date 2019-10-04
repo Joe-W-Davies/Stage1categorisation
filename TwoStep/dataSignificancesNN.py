@@ -360,7 +360,7 @@ if opts.className:
 
 ### Plot the m_gam,gam distribution for each of the catgeories (debug) ###
 #No diphoton BDT cut has been applied here yet -> this is just from the NN classification
-
+'''
 print 'making m_diphoton plots without dipho BDT cuts'
 
 finalFrameSig  = pd.concat([pd.DataFrame(diphoR), pd.DataFrame(diphoFW), pd.DataFrame(diphoM)],axis=1)
@@ -382,6 +382,7 @@ print 'sig events per catgeory selected by NN: '
 print procWeightDictSig
 print 'Bkg events per catgeory selected by NN: '
 print procWeightDictBkg
+'''
 
 #with open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/debug/nJetNNMgamgamNoDiphotBDT/sigsAndBkg.txt','w+') as f: 
 #  f.write('sigs: ')
@@ -391,83 +392,6 @@ print procWeightDictBkg
 #  f.write(str(procWeightDictBkg))
 #  f.write('\n sum of bkg: %.4f' % sum(procWeightDictBkg.values()))
 
-''' 
-#dont really need to do this, can just sum the weights
-#declare the 9 histos
-mggSigHistCat0 = r.TH1F('HggMassSigHistCat0',';Diphoton invariant mass score;events;', 60, 90, 220)
-mggBkgHistCat0 = r.TH1F('HggMassBkgHistCat0',';Diphoton invariant mass score;events;', 60, 90, 220)
-
-mggSigHistCat1 = r.TH1F('HggMassSigHistCat1',';Diphoton invariant mass score;events;', 60, 90, 220)
-mggBkgHistCat1 = r.TH1F('HggMassBkgHistCat1',';Diphoton invariant mass score;events;', 60, 90, 220)
-
-mggSigHistCat2 = r.TH1F('HggMassSigHistCat2',';Diphoton invariant mass score;events;', 60, 90, 220)
-mggBkgHistCat2 = r.TH1F('HggMassBkgHistCat2',';Diphoton invariant mass score;events;', 60, 90, 220)
-
-mggSigHistCat3 = r.TH1F('HggMassSigHistCat3',';Diphoton invariant mass score;events;', 60, 90, 220)
-mggBkgHistCat3 = r.TH1F('HggMassBkgHistCat3',';Diphoton invariant mass score;events;', 60, 90, 220)
-
-mggSigHistCat4 = r.TH1F('HggMassSigHistCat4',';Diphoton invariant mass score;events;', 60, 90, 220)
-mggBkgHistCat4 = r.TH1F('HggMassBkgHistCat4',';Diphoton invariant mass score;events;', 60, 90, 220)
-
-mggSigHistCat5 = r.TH1F('HggMassSigHistCat5',';Diphoton invariant mass score;events;', 60, 90, 220)
-mggBkgHistCat5 = r.TH1F('HggMassBkgHistCat5',';Diphoton invariant mass score;events;', 60, 90, 220)
-
-mggSigHistCat6 = r.TH1F('HggMassSigHistCat6',';Diphoton invariant mass score;events;', 60, 90, 220)
-mggBkgHistCat6 = r.TH1F('HggMassBkgHistCat6',';Diphoton invariant mass score;events;', 60, 90, 220)
-
-mggSigHistCat7 = r.TH1F('HggMassSigHistCat7',';Diphoton invariant mass score;events;', 60, 90, 220)
-mggBkgHistCat7 = r.TH1F('HggMassBkgHistCat7',';Diphoton invariant mass score;events;', 60, 90, 220)
-
-mggSigHistCat8 = r.TH1F('HggMassSigHistCat8',';Diphoton invariant mass score;events;', 60, 90, 220)
-mggBkgHistCat8 = r.TH1F('HggMassBkgHistCat8',';Diphoton invariant mass score;events;', 60, 90, 220)
-#fill histos and get entries
-sigAndBkgEntries = {} #form {proc num: (sig counts, bkg counts)}
-for iProc in range(nClasses):
-  for mggSig,mggBkg,w in zip( procMggSig[iProc], procMggData[iProc], procWeightDictSig[iProc]):
-    if iProc==0:
-      mggSigHistCat0.Fill(mggSig,w)
-      mggBkgHistCat0.Fill(mggBkg)
-      sigAndBkgEntries[iProc] = (mggSigHistCat0.GetEntries(), mggBkgHistCat0.GetEntries())
-    if iProc==1:
-      mggSigHistCat1.Fill(mggSig,w)
-      mggBkgHistCat1.Fill(mggBkg)
-      sigAndBkgEntries[iProc] = (mggSigHistCat1.GetEntries(), mggBkgHistCat1.GetEntries())
-    if iProc==2:
-      mggSigHistCat2.Fill(mggSig,w)
-      mggBkgHistCat2.Fill(mggBkg)
-      sigAndBkgEntries[iProc] = (mggSigHistCat2.GetEntries(), mggBkgHistCat2.GetEntries())
-    if iProc==3:
-      mggSigHistCat3.Fill(mggSig,w)
-      mggBkgHistCat3.Fill(mggBkg)
-      sigAndBkgEntries[iProc] = (mggSigHistCat3.GetEntries(), mggBkgHistCat3.GetEntries())
-    if iProc==4:
-      mggSigHistCat4.Fill(mggSig,w)
-      mggBkgHistCat4.Fill(mggBkg)
-      sigAndBkgEntries[iProc] = (mggSigHistCat4.GetEntries(), mggBkgHistCat4.GetEntries())
-    if iProc==5:
-      mggSigHistCat5.Fill(mggSig,w)
-      mggBkgHistCat5.Fill(mggBkg)
-      sigAndBkgEntries[iProc] = (mggSigHistCat5.GetEntries(), mggBkgHistCat5.GetEntries())
-    if iProc==6:
-      mggSigHistCat6.Fill(mggSig,w)
-      mggBkgHistCat6.Fill(mggBkg)
-      sigAndBkgEntries[iProc] = (mggSigHistCat6.GetEntries(), mggBkgHistCat6.GetEntries())
-    if iProc==7:
-      mggSigHistCat7.Fill(mggSig,w)
-      mggBkgHistCat7.Fill(mggSig)
-      sigAndBkgEntries[iProc] = (mggSigHistCat7.GetEntries(), mggBkgHistCat7.GetEntries())
-    if iProc==8:
-      mggSigHistCat8.Fill(mggSig,w)
-      mggBkgHistCat8.Fill(mggBkg)
-      sigAndBkgEntries[iProc] = (mggSigHistCat8.GetEntries(), mggBkgHistCat8.GetEntries())
-
-# save histo and stats for each catgeory
-f_output.Write() 
-f_output.Close()    
-with open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/debug/recoPlotsNoDiphoBDT/sigAndBkgCounts.txt','w+') as f: 
-  f.write(str(sigAndBkgEntries))
-print 'finished diphoton invariant mass plots'
-'''
 
 
 #now estimate two-class significance for the alt dipho model
@@ -642,8 +566,9 @@ cat6HistDiphoCuts.GetYaxis().SetTitleOffset(1.4)
 cat6HistDiphoCuts.GetZaxis().SetTitleOffset(1.2)
 useSty.drawCMS(onTop=True)
 useSty.drawEnPu(lumi='35.9 fb^{-1} (2016)')
-canv.Print("/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nClassOutputs/NN/cat62DScanNNMCWeightsExamplePlot.pdf")
+#canv.Print("/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nJetOutputs/NN/EQW/catSixAMSTwoDimScan.pdf")
 #sys.exit(1)
+
 
 #cat6Graph = r.TGraph(len(cat6Info), array('d', cat6Info.keys()), array('d', cat6Info.values()) )
 #cat6Graph.Draw('AP')
@@ -661,7 +586,7 @@ canv.Print("/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoS
 #declare 2D hists
 nBinsX=nClasses+1 #include the ggH VBF-like procs that we later lump into one bin
 nBinsY=nClasses
-procHistReco = r.TH2F('procHistReco',';;;Signal composition (%)', nBinsX, -0.5, nBinsX-0.5, nBinsY, -0.5, nBinsY-0.5)
+procHistReco = r.TH2F('procHistReco',';STXS ggH process;Event category;Signal composition (%)', nBinsX, -0.5, nBinsX-0.5, nBinsY, -0.5, nBinsY-0.5)
 procHistReco.SetTitle('')
 prettyHist(procHistReco)
 procHistPred = r.TH2F('procHistPred',';;;Signal composition (%)', nBinsX, -0.5, nBinsX-0.5, nBinsY, -0.5, nBinsY-0.5)
@@ -743,7 +668,7 @@ green = array('d',green)
 blue = array('d',blue)
 
 r.TColor.CreateGradientColorTable(npoints, stops, red, green, blue, ncontours, alpha)
-r.gStyle.SetNumberContours(256)
+r.gStyle.SetNumberContours(256) #was 256
 #r.gStyle.SetGridColor(16)
 
 #Fill 2D hists with percentage of events
@@ -772,23 +697,28 @@ v_line.Draw()
 v_line_dark = r.TLine(9.5,-0.5,9.5,8.5)
 v_line_dark.SetLineColor(r.kBlack)
 v_line_dark.Draw()
-catHistReco.GetXaxis().SetTitleOffset(2.7)
+h_line_dark = r.TLine(-0.5,8.5,9.5,8.5)
+h_line_dark.SetLineColor(r.kBlack)
+h_line_dark.Draw()
+catHistReco.GetXaxis().SetTitleOffset(2.4)
 catHistReco.GetXaxis().SetTickLength(0)
 catHistReco.GetXaxis().LabelsOption('v')
 catHistReco.GetYaxis().SetTitleOffset(1.6)
 catHistReco.GetZaxis().SetTitleOffset(1.2)
+catHistReco.SetMarkerSize(1.6)
 catHistReco.SetMaximum(100)
 catHistReco.SetMinimum(0)
 useSty.drawCMS(onTop=True)
 useSty.drawEnPu(lumi='35.9 fb^{-1} (2016)')
+canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/forPoster/nClassNNPurityMatrix_MCW_forPoster.pdf')
 
 '''
 #NOTE: will need to change this for each weight scenario
 if opts.className:
   if 'nJetNN' in opts.className:
-    canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nJetOutputs/NN/nJetNNPurityMatrixDataSigsNoWeights.pdf')
+    canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nJetOutputs/NN/NoW/nJetNNPurityMatrix_NoW.pdf')
   elif 'nClass' in opts.className:
-    canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nClassOutputs/NN/nClassNNPurityMatrixDataSigsMCWeights.pdf')
+    canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nClassOutputs/NN/MCW/nClassNNPurityMatrix_MCW.pdf')
 else: #reco
     canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/debug/recoPlotsWithFits/purityMatrixReco.pdf')
 '''
@@ -808,7 +738,10 @@ v_line.Draw()
 v_line_dark = r.TLine(9.5,-0.5,9.5,8.5)
 v_line_dark.SetLineColor(r.kBlack)
 v_line_dark.Draw()
-procHistReco.GetXaxis().SetTitleOffset(2.7)
+h_line_dark = r.TLine(-0.5,8.5,9.5,8.5)
+h_line_dark.SetLineColor(r.kBlack)
+h_line_dark.Draw()
+procHistReco.GetXaxis().SetTitleOffset(2.4)
 procHistReco.GetXaxis().SetTickLength(0)
 procHistReco.GetXaxis().LabelsOption('v')
 procHistReco.GetYaxis().SetTitleOffset(1.6)
@@ -822,98 +755,22 @@ useSty.drawEnPu(lumi='35.9 fb^{-1} (2016)')
 #NOTE: will need to change this for each weight scenario
 if opts.className:
   if 'nJetNN' in opts.className:
-    canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nJetOutputs/NN/nJetNNPurityMatrixDataSigsNoWeightsNormByProc.pdf')
+    canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nJetOutputs/NN/NoW/nJetNNPurityMatrixNormByProc_NoW.pdf')
   elif 'nClass' in opts.className:
-    canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nClassOutputs/NN/nClassNNPurityMatrixDataSigsMCWeightsNormByProc.pdf')
+    canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nClassOutputs/NN/MCW/nClassNNPurityMatrixNormByProc_MCW.pdf')
 else: #reco
     canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/debug/recoPlotsWithFits/purityMatrixNormByProcReco.pdf')
 '''
 
-                                 ##### make sig radar plots #####
-sigArrayBDT  = sigList
-sigArrayReco = [2.278, 5.535, 2.215, 2.678, 1.513, 2.444, 1.552, 2.464, 3.838]                                  
-
-df = pd.DataFrame({
-    'group':['BDT','Reco'],
-    'Bin 1': [sigArrayBDT[0], sigArrayReco[0]],
-    'Bin 2': [sigArrayBDT[1], sigArrayReco[1]],
-    'Bin 3': [sigArrayBDT[2], sigArrayReco[2]],
-    'Bin 4': [sigArrayBDT[3], sigArrayReco[3]],
-    'Bin 5': [sigArrayBDT[4], sigArrayReco[4]],
-    'Bin 6': [sigArrayBDT[5], sigArrayReco[5]],
-    'Bin 7': [sigArrayBDT[6], sigArrayReco[6]],
-    'Bin 8': [sigArrayBDT[7], sigArrayReco[7]],
-    'Bin 9': [sigArrayBDT[8], sigArrayReco[8]] 
-})
-
-print(df)
-
-# number of variables
-#categories=list(df)[1:]
-categories = ['Bin 1', 'Bin 2', 'Bin 3', 'Bin 4', 'Bin 5', 'Bin 6', 'Bin 7', 'Bin 8', 'Bin 9']
-N = len(categories)
-
-
-# Calculate angle of axis (plot / number of variable)
-angles = [n / float(N) * 2 * pi for n in range(N)]
-angles += angles[:1]
-
-
-# Initialise the spider plot
-ax = plt.subplot(111, polar=True)
-
-# Draw one axe per variable + add labels labels yet
-plt.xticks(angles[:-1], categories, color='grey', size=12)
- 
-# Draw ylabels
-ax.set_rlabel_position(0)
-plt.yticks([0,1,2,3,4,5,6], ["0","1","2","3","4","5",""], color="grey", size=7)
-plt.ylim(0,6)
- 
-  
-# Plot data
-#NN
-values=df.loc[0].drop('group').values.flatten().tolist()
-values += values[:1]
-ax.plot(angles, values, linewidth=1, linestyle='solid', label="STXS bin NN", color='b')
-ax.fill(angles, values, 'b', alpha=0.1)
- 
-# Reco
-values=df.loc[1].drop('group').values.flatten().tolist()
-values += values[:1]
-ax.plot(angles, values, linewidth=1, linestyle='solid', label="Reco", color='r')
-ax.fill(angles, values, 'r', alpha=0.1)
-
-# Add legend
-plt.legend(loc='upper right', bbox_to_anchor=(0.18, 0.04))
-plt.show()
-#NOTE: will need to change this for each weight scenario
-#if opts.className:
-#  if 'nJetNN' in opts.className:
-#    plt.savefig('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nJetOutputs/NN/nJetNNSigsPlotNoWeights.pdf')
-#  elif 'nClass' in opts.className:
-#    plt.savefig('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nClassOutputs/NN/nClassBDTSigsPlotMCWeights.pdf')
-#else: #reco
-#  plt.savefig('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/debug/recoPlotsWithFits/SigsPlotReco.pdf')  
-
                                ##### plot category efficiencies as radar plot #####
-#remove the vbf-like EVENTS (not just numbers, which happens if using logic masks on numpy arrays)
-# i.e. doing: diphoYDebug = diphoJ[diphoJ < 9] will  make all efficiencies way too low...
-
-trainTotal = trainTotal[trainTotal.truthClass < 9]
-trueClass  = trainTotal['truthClass'].values
 recoClass  = trainTotal['reco'].values
 weights    = trainTotal['weight'].values
 
-#NN:
-
-
-#reco:
-#Create and fill correct and incorrect dicts
+    #NN:
 correctDict   = {0:[],1:[],2:[],3:[],4:[],5:[],6:[],7:[],8:[]}
-incorrectDict = {0:[],1:[],2:[],3:[],4:[],5:[],6:[],7:[],8:[]}
+incorrectDict = {0:[],1:[],2:[],3:[],4:[],5:[],6:[],7:[],8:[],9:[],10:[],11:[],12:[]}
 
-for true, guess, weight in zip(trueClass, recoClass, weights):
+for true, guess, weight in zip(diphoJ, diphoR, weights): #was trueClass,recoClass
   if true==guess:
     correctDict[true].append(weight)
   else:
@@ -925,11 +782,57 @@ incorrectList = []
 #sum the weights in the dict for each cat
 for iCat in range(len(correctDict.keys())):
   correctList.append(sum(correctDict[iCat]))
+
+for iCat in range(len(incorrectDict.keys())-4):
   incorrectList.append(sum(incorrectDict[iCat]))
 
 #convert to numpy for pyplot
 correctArray   = np.asarray(correctList)
 incorrectArray = np.asarray(incorrectList)
+
+print('correctArray')
+print(correctArray)
+
+print('incorrectArray')
+print(incorrectArray)
+
+effArrayMVA = correctArray/(correctArray+incorrectArray)
+print('MVA Effs are:')
+print(effArrayMVA)
+print('\nAverage MVA eff is: %f'%effArrayMVA.mean())
+
+    #reco:
+#Create and fill correct and incorrect dicts
+correctDict   = {0:[],1:[],2:[],3:[],4:[],5:[],6:[],7:[],8:[]}
+incorrectDict = {0:[],1:[],2:[],3:[],4:[],5:[],6:[],7:[],8:[],9:[],10:[],11:[],12:[]}
+
+for true, guess, weight in zip(diphoJ, recoClass, weights): #was trueClass,recoClass
+  if true==guess:
+    correctDict[true].append(weight)
+  else:
+    incorrectDict[true].append(weight)
+
+correctList   = []
+incorrectList = []
+
+
+
+#sum the weights in the dict for each cat
+for iCat in range(len(correctDict.keys())):
+  correctList.append(sum(correctDict[iCat]))
+
+for iCat in range(len(incorrectDict.keys())-4):
+  incorrectList.append(sum(incorrectDict[iCat]))
+
+#convert to numpy for pyplot
+correctArray   = np.asarray(correctList)
+incorrectArray = np.asarray(incorrectList)
+
+print('correctArray')
+print(correctArray)
+
+print('incorrectArray')
+print(incorrectArray)
 
 effArrayReco = correctArray/(correctArray+incorrectArray)
 print('reco Effs are:')
@@ -937,3 +840,64 @@ print(effArrayReco)
 print('\nAverage Reco eff is: %f'%effArrayReco.mean())
 
 
+                                 ##### make eff radar plots #####
+
+df = pd.DataFrame({
+    'group':['NN','Reco'],
+    'Bin 1': [effArrayMVA[0], effArrayReco[0]],
+    'Bin 2': [effArrayMVA[1], effArrayReco[1]],
+    'Bin 3': [effArrayMVA[2], effArrayReco[2]],
+    'Bin 4': [effArrayMVA[3], effArrayReco[3]],
+    'Bin 5': [effArrayMVA[4], effArrayReco[4]],
+    'Bin 6': [effArrayMVA[5], effArrayReco[5]],
+    'Bin 7': [effArrayMVA[6], effArrayReco[6]],
+    'Bin 8': [effArrayMVA[7], effArrayReco[7]],
+    'Bin 9': [effArrayMVA[8], effArrayReco[8]] 
+})
+
+print(df)
+
+# number of variables
+#categories=list(df)[1:]
+categories = ['0J low', '0J high', '1J low', '1J med', '1J high', '2J low', '2J med', '2J high', 'BSM']
+N = len(categories)
+
+
+# Calculate angle of axis (plot / number of variable)
+angles = [n / float(N) * 2 * pi for n in range(N)]
+angles += angles[:1]
+
+
+# Initialise the spider plot
+ax = plt.subplot(111, polar=True)
+
+#Add text box for axis label
+plt.text(6, 0.35, 'Efficiency', color="grey")
+
+# Draw one axe per variable + add labels labels yet
+plt.xticks(angles[:-1], categories, color='grey', size=12)
+ 
+# Draw ylabels
+ax.set_rlabel_position(0)
+plt.yticks([0,0.2,0.4,0.6,0.8,1], ["0.0", "0.2","0.4","0.6","0.8",""], color="grey", size=10)
+plt.ylim(0,1)
+ 
+  
+# Plot data
+#NN
+values=df.loc[0].drop('group').values.flatten().tolist()
+values += values[:1]
+ax.plot(angles, values, linewidth=1, linestyle='solid', label="NN", color='b')
+ax.fill(angles, values, 'b', alpha=0.1)
+ 
+# Reco
+values=df.loc[1].drop('group').values.flatten().tolist()
+values += values[:1]
+ax.plot(angles, values, linewidth=1, linestyle='solid', label="Reco", color='r')
+ax.fill(angles, values, 'r', alpha=0.1)
+
+
+# Add legend
+plt.legend(loc='upper right', bbox_to_anchor=(0.14, 0.04))
+plt.show()
+#plt.savefig('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nJetOutputs/NN/NoW/effRadarPlot.pdf')

@@ -160,8 +160,8 @@ class CatOptim:
       bkgs = []
       nons = []
       if classNo==5: #do class 5 manually (print out some values)
-        diphoCuts1 = np.linspace(0.5,1,101) #higher cut. nominally: (0.5,1,101)
-        diphoCuts2 = np.linspace(0.5,1,101) #lower cut. nominally: (0.5,1,101)
+        diphoCuts1 = np.linspace(0.5,1,11) #higher cut. nominally: (0.5,1,101)
+        diphoCuts2 = np.linspace(0.5,1,11) #lower cut. nominally: (0.5,1,101)
         sigWeights = self.sigWeights
         bkgWeights = self.bkgWeights
         for diphoCut1 in diphoCuts1: #upper category
@@ -206,8 +206,11 @@ class CatOptim:
               
               #fill dict iwth {(cut1, cut2) = AMS}
               AMStot = (((AMSupper)**2) + ((AMSlower)**2))**(1./2.)
-              self.cat6AMS[(diphoCut1, diphoCut2)] = AMStot
-              #print('total AMS %.3f' % AMStot)
+              if AMStot < 1.0: #ignore spurious values (most sensible ones are 0.6)
+                self.cat6AMS[(diphoCut1, diphoCut2)] = AMStot
+                #print('total AMS %.3f' % AMStot)
+              else: 
+                AMStot = 0.0 
       else:
        for iCat in range(self.nCats): #number of sub-cats we are splitting the cat into
          lastCat = (iCat+1 == self.nCats) #boolean, set to true if on last cat

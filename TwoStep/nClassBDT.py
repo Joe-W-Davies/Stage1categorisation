@@ -139,7 +139,7 @@ if not opts.dataFrame:
 
   trainTotal['truthClass'] = trainTotal.apply(truthClass, axis=1)
   #Remove vbf-like classes as don't care about predicting them
-  # onlt do this at gen level in training!
+  # only do this at gen level in training!
   trainTotal = trainTotal[trainTotal.truthClass<9]
   trainTotal['diphopt'] = trainTotal.apply(addPt, axis=1)
   trainTotal['reco'] = trainTotal.apply(reco, axis=1)
@@ -147,6 +147,7 @@ if not opts.dataFrame:
   trainTotal['procWeight'] = trainTotal.apply(procWeight, axis=1)
   trainTotal['sqrtProcWeight'] = trainTotal.apply(sqrtProcWeight, axis=1)
   trainTotal['cbrtProcWeight'] = trainTotal.apply(cbrtProcWeight, axis=1)
+  trainTotal['truthDipho'] = trainTotal.apply(truthDipho, axis=1)
   print 'all columns added'
 
   #only select processes relevant for nJet training                                                             
@@ -214,8 +215,8 @@ classTrainR, classTestR  = np.split( classR,  [classTrainLimit] )
 classTrainY, classTestY  = np.split( classY,  [classTrainLimit] )
 
 #build the category classifier
-trainingMC = xg.DMatrix(classTrainI, label=classTrainY, feature_names=allVars)
-testingMC  = xg.DMatrix(classTestI, label=classTestY, weight=classTestProcW, feature_names=allVars)
+trainingMC = xg.DMatrix(classTrainI, label=classTrainY, weight=classTrainFW, feature_names=allVars)
+testingMC  = xg.DMatrix(classTestI, label=classTestY, weight=classTestFW, feature_names=allVars)
 
 trainParams = {}
 trainParams['objective'] = 'multi:softprob'
@@ -232,32 +233,33 @@ if opts.trainParams:
     trainParams[key] = data
     paramExt += '%s_%s__'%(key,data)
   paramExt = paramExt[:-2]
-
+#else:
+#  nClassesModel = xg.Booster()
+#  nClassesModel.load_model('/vols/cms/jwd18/Stage1categorisation/Pass1/2016/models/nClassesModelMCWeights___min_child_weight_13__n_estimators_18__sub_sample_0.9030__eta_0.76__colsample_bytree_0.95__max_depth_12__gamma_1.85__lambda_1.8283.model')
 
 #Time the training
 startTime = time.time()
 
-'''
 #cross validate and chose models that gives smallest out of fold prediction error
-print 'starting cross validation'
-cvResult = xg.cv(trainParams, trainingMC, num_boost_round=2000,  nfold = 4, early_stopping_rounds = 50, stratified = True, verbose_eval=True , seed = 12345)
-print('Best number of trees = {}'.format(cvResult.shape[0]))
-trainParams['n_estimators'] = cvResult.shape[0]
-'''
+#print 'starting cross validation'
+#cvResult = xg.cv(trainParams, trainingMC, num_boost_round=2000,  nfold = 4, early_stopping_rounds = 50, stratified = True, verbose_eval=True , seed = 12345)
+#print('Best number of trees = {}'.format(cvResult.shape[0]))
+#trainParams['n_estimators'] = cvResult.shape[0]
+
 
 #Fit the model with best n_trees/estimators
 print('Fitting on the training data')
 nClassesModel = xg.train(trainParams, trainingMC) 
 print('Done')
 
+
 endTime = time.time()
 
-#save: NOTE: don't do this when doing random HP search or will save thousands of models
-
-if not path.isdir(modelDir):
-  system('mkdir -p %s'%modelDir)
-nClassesModel.save_model('%s/nClassesModelNoWeights_%s.model'%(modelDir,paramExt))
-print 'saved as %s/nClassesModelNoWeights_%s.model'%(modelDir,paramExt)
+##save. NOTE: don't do this when doing random HP search or will save thousands of models
+#if not path.isdir(modelDir):
+#  system('mkdir -p %s'%modelDir)
+#nClassesModel.save_model('%s/nClassesModelTestPeturbedHPs_%s.model'%(modelDir,paramExt))
+#print 'saved as %s/nClassesModelTestPeturbedHPs_%s.model'%(modelDir,paramExt)
 
 
 # Use the priors to tell the probs something about the abundance/likelihood of procs
@@ -273,6 +275,11 @@ classPredY = np.argmax(predProbClass, axis=1)
 
 #No priors
 predProbClass = nClassesModel.predict(testingMC).reshape(classTestY.shape[0],nGGHClasses)
+print('class probs no reshape')
+print(nClassesModel.predict(testingMC))
+print('class probs with reshape')
+print(predProbClass)
+
 classPredY = np.argmax(predProbClass, axis=1) 
 
 
@@ -436,21 +443,21 @@ useSty.drawEnPu(lumi='%.1f fb^{-1}'%opts.intLumi)
 
 
 #print log-loss to text file (used in HP optimiastion). Print other params too for interest
-#lossFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/Losses/nClassBDT/losses_CbrtEW.txt','a+')
-#lossHPFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/Losses/nClassBDT/losses_CbrtEW_HP.txt','a+')
-#eff_array = np.zeros(nGGHClasses)
-#for iBin in range(1, nGGHClasses+1):
-#  eff_array[iBin-1] = rightHist.GetBinContent(iBin)
-#print('BDT avg eff: %1.4f' %(np.average(eff_array)))
-#lines = lossFile.readlines()
-#lossList = []
-#for line in lines:
-#  lossList.append(float(line))
-#if (mLogLoss < lossList[-1]):
-#  lossFile.write('%1.4f\n' % mLogLoss) 
-#  lossHPFile.write('HPs: %s --> loss: %1.4f. acc:%1.4f. <eff>: %1.4f\n' % (trainParams,mLogLoss,BDTaccuracy,np.average(eff_array)) ) 
-#lossFile.close()
-#lossHPFile.close()
+lossFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/Losses/nClassBDT/losses_CbrtEW.txt','a+')
+lossHPFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/Losses/nClassBDT/losses_CbrtEW_HP.txt','a+')
+eff_array = np.zeros(nGGHClasses)
+for iBin in range(1, nGGHClasses+1):
+  eff_array[iBin-1] = rightHist.GetBinContent(iBin)
+print('BDT avg eff: %1.4f' %(np.average(eff_array)))
+lines = lossFile.readlines()
+lossList = []
+for line in lines:
+  lossList.append(float(line))
+if (mLogLoss < lossList[-1]):
+  lossFile.write('%1.4f\n' % mLogLoss) 
+  lossHPFile.write('HPs: %s --> loss: %1.4f. acc:%1.4f. <eff>: %1.4f\n' % (trainParams,mLogLoss,BDTaccuracy,np.average(eff_array)) ) 
+lossFile.close()
+lossHPFile.close()
 
 
 
@@ -562,7 +569,7 @@ prettyHist(catHistReco)
 catHistReco.Draw('colz,text')
 #canv.Print('%s/catJetHistReco%s.pdf'%(plotDir,paramExt))
 #canv.Print('%s/catJetHistReco%s.png'%(plotDir,paramExt))
-#canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/MultiCatPlots/catJetHistReco%s.pdf'%(paramExt))
+#canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/purityMatricesForRobustness/recoFromTraining_%s.png'%(paramExt))
 prettyHist(procHistPred)
 procHistPred.Draw('colz,text')
 #canv.Print('%s/procJetHistPred%s.pdf'%(plotDir,paramExt))
@@ -572,7 +579,7 @@ prettyHist(catHistPred)
 catHistPred.Draw('colz,text')
 #canv.Print('%s/catJetHistPred%s.pdf'%(plotDir,paramExt))
 #canv.Print('%s/catJetHistPred%s.png'%(plotDir,paramExt))
-#canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/MultiCatPlots/catMultiClassHistPred%s.pdf'%(paramExt))
+canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/purityMatricesForRobustness/oldBDTBestHPs_%s.png'%(paramExt))
 
 # get feature importances
 plt.figure(1)

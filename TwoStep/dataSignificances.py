@@ -30,7 +30,7 @@ parser.add_option('-d','--dataFrame', default=None, help='Name of dataframe if i
 parser.add_option('-s','--signifFrame', default=None, help='Name of cleaned signal dataframe if it already exists')
 parser.add_option('-m','--modelName', default=None, help='Name of model for testing')
 parser.add_option('-c','--className', default=None, help='Name of multi-class model used to build categories. If None, use reco categories')
-parser.add_option('-n','--nIterations', default=3500, help='Number of iterations to run for random significance optimisation') #previously was default = 2000
+parser.add_option('-n','--nIterations', default=1, help='Number of iterations to run for random significance optimisation') #previously was default = 2000
 parser.add_option('--intLumi',type='float', default=35.9, help='Integrated luminosity') #def:35.9
 (opts,args)=parser.parse_args()
 
@@ -142,6 +142,7 @@ if not opts.dataFrame:
 
   #add extra info to dataframe
   print 'about to add extra columns'
+
   dataTotal['diphopt'] = dataTotal.apply(addPt, axis=1)
   dataTotal['reco'] = dataTotal.apply(reco, axis=1)
   print 'all columns added'
@@ -228,6 +229,8 @@ if not opts.signifFrame:
   trainTotal = trainTotal[trainTotal.reco!=-1]
   trainTotal['truthDipho'] = trainTotal.apply(truthDipho, axis=1)
   trainTotal['truthClass'] = trainTotal.apply(truthClass, axis=1)
+  #FIXME: temporary debug
+  trainTotal = trainTotal[trainTotal.truthClass<9]
   print 'Successfully added reco tag info'
 
   #save
@@ -240,7 +243,6 @@ else:
   #read in already cleaned up signal frame
   trainTotal = pd.read_pickle('%s/%s'%(frameDir,opts.signifFrame))
   print 'Successfully loaded the signal dataframe'
-
 
 #define the variables used as input to the classifier
 if (opts.className):
@@ -283,7 +285,8 @@ diphoPredY = diphoModel.predict(diphoMatrix)
 dataPredY  = diphoModel.predict(dataMatrix)
 
 print('reco accuracy score is:')
-print(accuracy_score(diphoJ, diphoR, sample_weight=diphoFW))
+recoScore = accuracy_score(diphoJ, diphoR, sample_weight=diphoFW)
+print(recoScore)
 #load the classifier model to be tested, if it exists
 #only trained the model to predict 9 categories, so exclude these from cats but keep in gen bins (purity mat)
 if opts.className:
@@ -359,29 +362,34 @@ for iClass in range(nClasses):
   #optimiser.setTransform(True) #FIXME
   optimiser.optimise(opts.intLumi, opts.nIterations, iClass)
   #optimiser.crossCheck(opts.intLumi,plotDir)
-  printStr += 'Results for bin %g : \n'%iClass
-  printStr += optimiser.getPrintableResult()
-  toPrint = optimiser.getPrintableResult()
-  splits = toPrint.split(':')
-  BDTStr += (splits[1][14:19])
-  BDTStr += '\n'
-  BDTStr += (splits[2][14:19])
-  BDTStr += '\n'
-  Sig = float(splits[2][-9:-3])
+  if(iClass!=5):
+    printStr += 'Results for bin %g : \n'%iClass
+    printStr += optimiser.getPrintableResult(iClass)
+    toPrint = optimiser.getPrintableResult(iClass)
+    splits = toPrint.split(':')
+    BDTStr += (splits[1][14:19])
+    BDTStr += '\n'
+    BDTStr += (splits[2][14:19])
+    BDTStr += '\n'
+    Sig = float(splits[2][-9:-3])
  
-  ''' 
-  # For doing lumi scaling for combined and non combined. (Just care about 2016 only for now though)
-  if(scaleToLumi == True):
+    ''' 
+    # For doing lumi scaling for combined and non combined. (Just care about 2016 only for now though)
+    if(scaleToLumi == True):
+      SigStr += '%f'%Sig
+      SigStr += '\n'
+    else:
+      SigStr += '%f'%(Sig*(math.sqrt(lumiScale)))
+      SigStr += '\n' 
+     '''
+
     SigStr += '%f'%Sig
     SigStr += '\n'
+    sigList.append(Sig)
   else:
-    SigStr += '%f'%(Sig*(math.sqrt(lumiScale)))
-    SigStr += '\n' 
-   '''
+    cat6Info = optimiser.getPrintableResult(iClass) 
+    sigList.append(0)
 
-  SigStr += '%f'%Sig
-  SigStr += '\n'
-  sigList.append(Sig)
 
 #No bins requiring 3 cats for 1.1
 #binsRequiringThree = [0] 
@@ -401,11 +409,14 @@ for iClass in range(nClasses):
 print
 print printStr
 
+print('Accuracy is:')
+print(accuracy_score(diphoJ, diphoR, sample_weight=diphoFW))
+
 #print the cuts to the files for use in analysis.py later (plotting confusion matrices using these cuts)
 '''
 #NOTE: These both print cuts/sigs for scaling to 137fb^-1. If you want it for 2016,
 #NOTE: run on 36.9 without background scaling, and look at BDT cuts file (indiv). Sigs will
-#NOTE: change since we multiply by sqrt(alpha), but BDT cuts do not, as found through earlier opt. 
+#NOTE: change since we multiply by sqrt(alpha), b ut BDT cuts do not, as found through earlier opt. 
 if(scaleToLumi==True):
   BDTCutFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/BDTCutsComb.txt','w+')
   BDTCutFile.write('%s'%BDTStr)
@@ -426,6 +437,7 @@ else:
 
 
 #for nJet BDT options. NOTE: change this for each weight scenario you are considering
+'''
 if opts.className:
   if 'Jet' in opts.className:
     BDTCutFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nJetOutputs/BDT/diphoBDTCutsWithNoWeights.txt','w+')
@@ -451,6 +463,48 @@ else: #reco
     sigsCutFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/reco/catSigsReco.txt','w+')
     sigsCutFile.write('%s'%printStr)
     sigsCutFile.close()
+'''
+
+                                         ##### Plot cat6 Info #####
+#Set up color pallete and other canvas options
+npoints = 2
+stops = [0.00,1.00]
+red = [1.00, 0.50]
+green = [1.00, 0.00]
+blue = [1.00, 0.70]
+ncontours = 256
+alpha=1.
+
+stops = array('d',stops)
+red = array('d',red)
+green = array('d',green)
+blue = array('d',blue)
+
+r.TColor.CreateGradientColorTable(npoints, stops, red, green, blue, ncontours, alpha)
+r.gStyle.SetNumberContours(256)
+
+                               ##### Plot cat 6 stuff #####
+cat6HistDiphoCuts = r.TH2F('histo', ';;;Combined AMS value', 101, 0.5, 1.0, 101, 0.5, 1.0)
+cut1, cut2 = zip(*cat6Info)
+AMS = cat6Info.values()
+for iCut1, iCut2, iAMS in zip(cut1, cut2, AMS):
+  cat6HistDiphoCuts.Fill(iCut1, iCut2, iAMS)
+
+#draw and save the 2D hists
+canv = r.TCanvas()
+canv.SetRightMargin(0.15)
+canv.SetLeftMargin(0.12)
+canv.SetBottomMargin(0.12)
+canv.SetRightMargin(0.15)
+cat6HistDiphoCuts.Draw('COLZ')
+cat6HistDiphoCuts.GetXaxis().SetTitleOffset(1.4)
+cat6HistDiphoCuts.GetXaxis().SetTitle('Diphoton BDT cut 1')
+cat6HistDiphoCuts.GetYaxis().SetTitle('Diphoton BDT cut 2')
+cat6HistDiphoCuts.GetYaxis().SetTitleOffset(1.4)
+cat6HistDiphoCuts.GetZaxis().SetTitleOffset(1.2)
+useSty.drawCMS(onTop=True)
+useSty.drawEnPu(lumi='35.9 fb^{-1} (2016)')
+#canv.Print("/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/reco/catSixAMSTwoDimScan.pdf")
 
 
 ##### Plot purity matrices #####
@@ -514,16 +568,16 @@ for iBin in range(nClasses+1):
 
 for iBin in range(nClasses):
     procHistReco.GetYaxis().SetBinLabel( iBin+1, catNames[iBin] )
-    procHistReco.GetYaxis().SetTitle('Event Category')
+    procHistReco.GetYaxis().SetTitle('Event category')
 
     procHistPred.GetYaxis().SetBinLabel( iBin+1, catNames[iBin] )
-    procHistPred.GetYaxis().SetTitle('Event Category')
+    procHistPred.GetYaxis().SetTitle('Event category')
 
     catHistReco.GetYaxis().SetBinLabel( iBin+1, catNames[iBin] )
-    catHistReco.GetYaxis().SetTitle('Event Category')
+    catHistReco.GetYaxis().SetTitle('Event category')
 
     catHistPred.GetYaxis().SetBinLabel( iBin+1, catNames[iBin] )
-    catHistPred.GetYaxis().SetTitle('Event Category')
+    catHistPred.GetYaxis().SetTitle('Event category')
 
 #Set up color pallete and other canvas options
 npoints = 2
@@ -570,7 +624,10 @@ v_line.Draw()
 v_line_dark = r.TLine(9.5,-0.5,9.5,8.5)
 v_line_dark.SetLineColor(r.kBlack)
 v_line_dark.Draw()
-catHistReco.GetXaxis().SetTitleOffset(2.7)
+h_line_dark = r.TLine(-0.5,8.5,9.5,8.5)
+h_line_dark.SetLineColor(r.kBlack)
+h_line_dark.Draw()
+catHistReco.GetXaxis().SetTitleOffset(2.4)
 catHistReco.GetXaxis().SetTickLength(0)
 catHistReco.GetXaxis().LabelsOption('v')
 catHistReco.GetYaxis().SetTitleOffset(1.6)
@@ -579,16 +636,18 @@ catHistReco.SetMaximum(100)
 catHistReco.SetMinimum(0)
 useSty.drawCMS(onTop=True)
 useSty.drawEnPu(lumi='35.9 fb^{-1} (2016)')
+canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/purityMatricesForRobustness/dataSigs_reco.png')
 
-
+'''
 #NOTE: will need to change this for each weight scenario
 if opts.className:
   if 'Jet' in opts.className:
-    canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nJetOutputs/BDT/nJetBDTPurityMatrixDataSigsNoWeights.pdf')
+    canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nJetOutputs/BDT/NoW/nJetBDTPurityMatrix_NoW.pdf')
   elif 'nClass' in opts.className:
-    canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nClassOutputs/BDT/nClassBDTPurityMatrixDataSigsNoWeights.pdf')
+    canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nClassOutputs/BDT/NoW/nClassBDTPurityMatrix_NoW.pdf')
 else: #reco
-    canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/reco/PurityMatrixDataSigsReco.pdf')
+  canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/reco/PurityMatrixReco.pdf')
+'''
 
 canv = r.TCanvas()
 canv.SetRightMargin(0.15)
@@ -605,48 +664,126 @@ v_line.Draw()
 v_line_dark = r.TLine(9.5,-0.5,9.5,8.5)
 v_line_dark.SetLineColor(r.kBlack)
 v_line_dark.Draw()
-procHistReco.GetXaxis().SetTitleOffset(2.7)
+h_line_dark = r.TLine(-0.5,8.5,9.5,8.5)
+h_line_dark.SetLineColor(r.kBlack)
+h_line_dark.Draw()
+procHistReco.GetXaxis().SetTitleOffset(2.4)
 procHistReco.GetXaxis().SetTickLength(0)
 procHistReco.GetXaxis().LabelsOption('v')
 procHistReco.GetYaxis().SetTitleOffset(1.6)
 procHistReco.GetZaxis().SetTitleOffset(1.2)
-procHistReco.SetMaximum(100)
-procHistReco.SetMinimum(0)
 useSty.drawCMS(onTop=True)
 useSty.drawEnPu(lumi='35.9 fb^{-1} (2016)')
 
+'''
 #NOTE: will need to change this for each weight scenario
 if opts.className:
   if 'Jet' in opts.className:
-    canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nJetOutputs/BDT/nJetBDTPurityMatrixDataSigsNoWeightsNormByProc.pdf')
+    canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nJetOutputs/BDT/NoW/nJetBDTPurityMatrixNormByProc_NoW.pdf')
   elif 'nClass' in opts.className:
-    canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nClassOutputs/BDT/nClassBDTPurityMatrixDataSigsNoWeightNormByProc.pdf')
+    canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nClassOutputs/BDT/NoW/nClassBDTPurityMatrixNormByProc_NoW.pdf')
 else: #reco
-    canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/reco/PurityMatrixDataSigsRecoNormByProc.pdf')
+  canv.Print('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/reco/PurityMatrixRecoNormByProc.pdf')
+'''
 
 
-##### make sig radar plots #####
-sigArrayBDT  = sigList
-sigArrayReco = [2.278, 5.535, 2.215, 2.678, 1.513, 2.444, 1.552, 2.464, 3.838]
+                              ##### plot category efficiencies as radar plots #####
+recoClass  = trainTotal['reco'].values
+weights    = trainTotal['weight'].values
 
+    #BDT:
+correctDict   = {0:[],1:[],2:[],3:[],4:[],5:[],6:[],7:[],8:[]}
+incorrectDict = {0:[],1:[],2:[],3:[],4:[],5:[],6:[],7:[],8:[],9:[],10:[],11:[],12:[]}
+
+for true, guess, weight in zip(diphoJ, diphoR, weights): #was trueClass,recoClass
+  if true==guess:
+    correctDict[true].append(weight)
+  else:
+    incorrectDict[true].append(weight)
+
+correctList   = []
+incorrectList = []
+
+#sum the weights in the dict for each cat
+for iCat in range(len(correctDict.keys())):
+  correctList.append(sum(correctDict[iCat]))
+
+for iCat in range(len(incorrectDict.keys())-4):
+  incorrectList.append(sum(incorrectDict[iCat]))
+
+#convert to numpy for pyplot
+correctArray   = np.asarray(correctList)
+incorrectArray = np.asarray(incorrectList)
+
+print('correctArray')
+print(correctArray)
+
+print('incorrectArray')
+print(incorrectArray)
+
+effArrayMVA = correctArray/(correctArray+incorrectArray)
+print('MVA Effs are:')
+print(effArrayMVA)
+print('\nAverage MVA eff is: %f'%effArrayMVA.mean())
+
+    #reco:
+#Create and fill correct and incorrect dicts
+correctDict   = {0:[],1:[],2:[],3:[],4:[],5:[],6:[],7:[],8:[]}
+incorrectDict = {0:[],1:[],2:[],3:[],4:[],5:[],6:[],7:[],8:[],9:[],10:[],11:[],12:[]}
+
+for true, guess, weight in zip(diphoJ, recoClass, weights): #was trueClass,recoClass
+  if true==guess:
+    correctDict[true].append(weight)
+  else:
+    incorrectDict[true].append(weight)
+
+correctList   = []
+incorrectList = []
+
+
+
+#sum the weights in the dict for each cat
+for iCat in range(len(correctDict.keys())):
+  correctList.append(sum(correctDict[iCat]))
+
+for iCat in range(len(incorrectDict.keys())-4):
+  incorrectList.append(sum(incorrectDict[iCat]))
+
+#convert to numpy for pyplot
+correctArray   = np.asarray(correctList)
+incorrectArray = np.asarray(incorrectList)
+
+print('correctArray')
+print(correctArray)
+
+print('incorrectArray')
+print(incorrectArray)
+
+effArrayReco = correctArray/(correctArray+incorrectArray)
+print('reco Effs are:')
+print(effArrayReco)
+print('\nAverage Reco eff is: %f'%effArrayReco.mean())
+
+
+#do the plotting
 df = pd.DataFrame({
     'group':['BDT','Reco'],
-    'Bin 1': [sigArrayBDT[0], sigArrayReco[0]],
-    'Bin 2': [sigArrayBDT[1], sigArrayReco[1]],
-    'Bin 3': [sigArrayBDT[2], sigArrayReco[2]],
-    'Bin 4': [sigArrayBDT[3], sigArrayReco[3]],
-    'Bin 5': [sigArrayBDT[4], sigArrayReco[4]],
-    'Bin 6': [sigArrayBDT[5], sigArrayReco[5]],
-    'Bin 7': [sigArrayBDT[6], sigArrayReco[6]],
-    'Bin 8': [sigArrayBDT[7], sigArrayReco[7]],
-    'Bin 9': [sigArrayBDT[8], sigArrayReco[8]] 
+    'Bin 1': [effArrayMVA[0], effArrayReco[0]],
+    'Bin 2': [effArrayMVA[1], effArrayReco[1]],
+    'Bin 3': [effArrayMVA[2], effArrayReco[2]],
+    'Bin 4': [effArrayMVA[3], effArrayReco[3]],
+    'Bin 5': [effArrayMVA[4], effArrayReco[4]],
+    'Bin 6': [effArrayMVA[5], effArrayReco[5]],
+    'Bin 7': [effArrayMVA[6], effArrayReco[6]],
+    'Bin 8': [effArrayMVA[7], effArrayReco[7]],
+    'Bin 9': [effArrayMVA[8], effArrayReco[8]] 
 })
 
 print(df)
 
 # number of variables
 #categories=list(df)[1:]
-categories = ['Bin 1', 'Bin 2', 'Bin 3', 'Bin 4', 'Bin 5', 'Bin 6', 'Bin 7', 'Bin 8', 'Bin 9']
+categories = ['0J low', '0J high', '1J low', '1J med', '1J high', '2J low', '2J med', '2J high', 'BSM']
 N = len(categories)
 
 
@@ -658,20 +795,23 @@ angles += angles[:1]
 # Initialise the spider plot
 ax = plt.subplot(111, polar=True)
 
+#Add text box for axis label
+plt.text(6, 0.35, 'Efficiency', color="grey")
+
 # Draw one axe per variable + add labels labels yet
 plt.xticks(angles[:-1], categories, color='grey', size=12)
  
 # Draw ylabels
 ax.set_rlabel_position(0)
-plt.yticks([0,1,2,3,4,5,6], ["0","1","2","3","4","5",""], color="grey", size=10)
-plt.ylim(0,6)
+plt.yticks([0,0.2,0.4,0.6,0.8,1], ["0.0", "0.2","0.4","0.6","0.8",""], color="grey", size=10)
+plt.ylim(0,1)
  
   
 # Plot data
-#NN
+#BDT
 values=df.loc[0].drop('group').values.flatten().tolist()
 values += values[:1]
-ax.plot(angles, values, linewidth=1, linestyle='solid', label="STXS bin BDT", color='g')
+ax.plot(angles, values, linewidth=1, linestyle='solid', label="BDT", color='g')
 ax.fill(angles, values, 'b', alpha=0.1)
  
 # Reco
@@ -679,15 +819,9 @@ values=df.loc[1].drop('group').values.flatten().tolist()
 values += values[:1]
 ax.plot(angles, values, linewidth=1, linestyle='solid', label="Reco", color='r')
 ax.fill(angles, values, 'r', alpha=0.1)
- 
+
 # Add legend
-plt.legend(loc='upper right', bbox_to_anchor=(0.18, 0.04))
+plt.legend(loc='upper right', bbox_to_anchor=(0.14, 0.04))
 plt.show()
-#NOTE: will need to change this for each weight scenario
-if opts.className:
-  if 'Jet' in opts.className:
-    plt.savefig('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nJetOutputs/BDT/nJetBDTSigsPlotNoWeights.pdf')
-  elif 'nClass' in opts.className:
-    plt.savefig('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/nClassOutputs/BDT/nClassBDTSigsPlotNoWeights.pdf')
-else: #reco
-  plt.savefig('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/reco/SigsPlotReco.pdf')
+#plt.savefig('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/reco/effRadarPlot.pdf')   
+

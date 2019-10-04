@@ -124,15 +124,15 @@ def formatRatio(h):
     h.GetYaxis().SetNdivisions(505)
     h.GetYaxis().SetRangeUser(0.4, 1.6)
 
-def drawCMS(onTop=False, text='Simulation Preliminary'):
+def drawCMS(onTop=False, text='Simulation preliminary'):
     latex = TLatex()
     latex.SetNDC()
     latex.SetTextFont(62)
     latex.SetTextSize(0.0414)
-    latex.DrawLatex(0.18, 0.8 if not onTop else 0.94, "CMS")
+    latex.DrawLatex(0.118, 0.85 if not onTop else 0.91, "CMS") #was (0.18, 0.8) ... (0.94)
     latex.SetTextSize(0.0414)
     latex.SetTextFont(52)
-    latex.DrawLatex(0.25,0.95 if not onTop else 0.94, text) #0.273
+    latex.DrawLatex(0.186,0.85 if not onTop else 0.91, text) # was (0.25, 0.95) .... (0.94)
  
 def drawEnPu(pileup=None, lumi=None):
     latex = TLatex()
@@ -144,4 +144,4 @@ def drawEnPu(pileup=None, lumi=None):
     tex = '13 TeV'
     if pileup: tex += ', {0} PU'.format(pileup)
     if lumi: tex = '{0}, '.format(tex) + format(lumi)
-    latex.DrawLatex(0.95, 0.94, tex)
+    latex.DrawLatex(0.90, 0.91, tex) #was (0.95, 0.94)

@@ -146,6 +146,7 @@ script    = 'nClassBDT.py'
 #paramSets =['min_child_weight:2,n_estimators:196,sub_sample:0.8505,eta:0.75,colsample_bytree:0.90,max_depth:9,gamma:0.08,lambda:0.9049'] #best for Sqrt(EQ) weights 
 #paramSets =['min_child_weight:2,n_estimators:245,sub_sample:0.8985,eta:0.63,colsample_bytree:0.99,max_depth:14,gamma:0.06,lambda:0.9890'] #best for Cbrt(EQ) weights 
 #paramSets =['min_child_weight:11,n_estimators:16,sub_sample:0.9683,eta:0.69,colsample_bytree:0.97,max_depth:8,gamma:0.91,lambda:0.2412'] #best for No weights 
+#paramSets =['min_child_weight:12,n_estimators:17,sub_sample:0.9030,eta:0.7,colsample_bytree:0.95,max_depth:13,gamma:1.95,lambda:1.80'] # test: slightly peturb best model for MC weights 
 #paramSets = [None]
 #paramSets = [None,'eta:0.05,lambda:0,max_depth:3','eta:0.05,lambda:0,max_depth:10','eta:0.05,lambda:0,max_depth:20','eta:0.05,lambda:0.1,max_depth:3','eta:0.05,lambda:0.1,max_depth:10','eta:0.05,lambda:0.1,max_depth:20','eta:0.05,lambda:0.2,max_depth:3','eta:0.05,lambda:0.2,max_depth:10','eta:0.05,lambda:0.2,max_depth:20',
 #'eta:0.1,lambda:0,max_depth:3','eta:0.1,lambda:0,max_depth:10','eta:0.1,lambda:0,max_depth:20','eta:0.1,lambda:0.1,max_depth:3','eta:0.1,lambda:0.1,max_depth:10','eta:0.1,lambda:0.1,max_depth:20','eta:0.1,lambda:0.2,max_depth:3','eta:0.1,lambda:0.2,max_depth:10','eta:0.1,lambda:0.2,max_depth:20',
@@ -163,7 +164,7 @@ script    = 'nClassBDT.py'
 #param sets chosen randomly and submitted
 paramSets = []
 
-nIters = 3000
+nIters = 1
 nParams = 7
 
 for i in range(nIters):
@@ -185,9 +186,9 @@ classModel = None
 #dataFrame = 'multiClassTotal.pkl'
 dataFrame = None
 sigFrame  = None
-'''
-#NOTE: end of nClassBDT random HP opt
 
+#NOTE: end of nClassBDT random HP opt
+'''
 
 
 #NOTE: nJet NN 
@@ -285,23 +286,27 @@ sigFrame  = None
 
 
 #NOTE: Current implementation for ggH sigs with optional BDT
-'''
+
 script    = 'dataSignificances.py'
 models    = ['altDiphoModel__min_child_weight_5subsample_0.847204eta_0.75max_depth_7gamma_2.05.model'] 
 paramSets = [None] # no effect here, just for submission to work
-classModel = None #reco only
+#classModel = None #reco only
 #best nJet Models
 #classModel = 'nJetModelWithMCWeights__min_child_weight_2__n_estimators_207__subsample_0.8920__eta_0.72__colsample_bytree_0.9__max_depth_14__gamma_0.01__lambda_0.9671.model' #best nJet W_mc model
 #classModel = 'nJetModelWithEQWeights__min_child_weight_7__n_estimators_133__subsample_0.8151__eta_0.65__colsample_bytree_0.85__max_depth_8__gamma_0.08__lambda_0.1662.model' #best nJet W_eq model
 #classModel = 'nJetModelWithSqrtEQWeights__min_child_weight_4__n_estimators_195__subsample_0.9518__eta_0.65__colsample_bytree_0.72__max_depth_14__gamma_0.01__lambda_0.4570.model' #best njet W_sqrtEW
 #classModel = 'nJetModelWithCbrtEQWeights__min_child_weight_2__n_estimators_188__subsample_0.8661__eta_0.74__colsample_bytree_0.90__max_depth_9__gamma_0.04__lambda_0.3694.model' #best njet W_cbrtEW
 #classModel = 'nJetModelWithNoWeights__min_child_weight_9__n_estimators_21__subsample_0.8943__eta_0.53__colsample_bytree_0.97__max_depth_7__gamma_2.00__lambda_0.7469.model' #best njet no weight model
-#best nClass Models
-#classModel = 'nClassesModelMCWeights___min_child_weight_13__n_estimators_18__sub_sample_0.9030__eta_0.76__colsample_bytree_0.95__max_depth_12__gamma_1.85__lambda_1.8283.model' #best nClass W_mc model
+
+#best nClass Models 
+classModel = 'nClassesModelMCWeights___min_child_weight_13__n_estimators_18__sub_sample_0.9030__eta_0.76__colsample_bytree_0.95__max_depth_12__gamma_1.85__lambda_1.8283.model' #best nClass W_mc model
 #classModel = 'nClassesModelEQWeights___min_child_weight_2__n_estimators_47__sub_sample_0.9614__eta_0.74__colsample_bytree_0.98__max_depth_6__gamma_0.03__lambda_1.1377.model' #best nClass W_EQ model
 #classModel = 'nClassesModelSqrtEQWeights___min_child_weight_2__n_estimators_196__sub_sample_0.8505__eta_0.75__colsample_bytree_0.90__max_depth_9__gamma_0.08__lambda_0.9049.model' #best nClass Sqrt(EQ) model
 #classModel = 'nClassesModelCbrtEQWeights___min_child_weight_2__n_estimators_245__sub_sample_0.8985__eta_0.63__colsample_bytree_0.99__max_depth_14__gamma_0.06__lambda_0.9890.model' #best nClass Cbrt(EQ) model
-classModel = 'nClassesModelNoWeights___min_child_weight_11__n_estimators_16__sub_sample_0.9683__eta_0.69__colsample_bytree_0.97__max_depth_8__gamma_0.91__lambda_0.2412.model' #best nClass No weights model
+#classModel = 'nClassesModelNoWeights___min_child_weight_11__n_estimators_16__sub_sample_0.9683__eta_0.69__colsample_bytree_0.97__max_depth_8__gamma_0.91__lambda_0.2412.model' #best nClass No weights model
+#classModel = 'nClassesModelTestRobustness___min_child_weight_13__n_estimators_18__sub_sample_0.9030__eta_0.76__colsample_bytree_0.95__max_depth_12__gamma_1.85__lambda_1.8283.model' #testing robustness
+#classModel = 'nClassesModelTestPeturbedHPs___min_child_weight_12__n_estimators_17__sub_sample_0.9030__eta_0.7__colsample_bytree_0.95__max_depth_13__gamma_1.95__lambda_1.80.model' #testing again
+
 for params in paramSets:
   if not params: continue
   params = params.split(',')
@@ -316,13 +321,14 @@ for params in paramSets:
 paramSets = None
 dataFrame = 'dataTotal.pkl'
 #dataFrame = None
-sigFrame  = 'signifTotal.pkl'
+#sigFrame  = 'signifTotal.pkl'
+sigFrame  = 'MultiClassTotal.pkl'
 #sigFrame  = None
 ########intLumi = 137. #NOTE: uncomment iff doing combined optimisation
-'''
+
 
 #NOTE: Current implementation for ggH sigs with optional NN
-
+'''
 script    = 'dataSignificancesNN.py'
 models    = ['altDiphoModel__min_child_weight_5subsample_0.847204eta_0.75max_depth_7gamma_2.05.model'] #optmimise this model too  #,'diphoModel.model']
 paramSets = [None] # dipho model HPs
@@ -358,7 +364,7 @@ dataFrame = 'dataTotalNN.pkl'
 sigFrame  = 'signifTotalNN.pkl'
 #sigFrame  = None
 ########intLumi = 137. #NOTE: uncomment iff doing combined optimisation
-
+'''
 
 #NOTE: Check NN assigned bkg distributions for cats and associated BG
 '''

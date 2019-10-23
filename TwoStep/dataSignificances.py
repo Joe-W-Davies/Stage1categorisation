@@ -13,9 +13,9 @@ from os import path, system
 from array import array
 from math import pi
 
-from addRowFunctions import addPt, truthDipho, reco, diphoWeight, altDiphoWeight, truthClass, jetPtToggHClass
+from addRowFunctions import addPt, truthDipho, reco, diphoWeight, altDiphoWeight, truthClass1p1, jetPtToggHClass
 from otherHelpers import prettyHist, getAMS, computeBkg, getRealSigma 
-from root_numpy import tree2array, fill_hist
+from root_numpy import tree2array, fill_hist, array2tree
 from catOptim import CatOptim
 import usefulStyle as useSty
 
@@ -30,7 +30,7 @@ parser.add_option('-d','--dataFrame', default=None, help='Name of dataframe if i
 parser.add_option('-s','--signifFrame', default=None, help='Name of cleaned signal dataframe if it already exists')
 parser.add_option('-m','--modelName', default=None, help='Name of model for testing')
 parser.add_option('-c','--className', default=None, help='Name of multi-class model used to build categories. If None, use reco categories')
-parser.add_option('-n','--nIterations', default=1, help='Number of iterations to run for random significance optimisation') #previously was default = 2000
+parser.add_option('-n','--nIterations', default=1, help='Number of iterations to run for random significance optimisation')
 parser.add_option('--intLumi',type='float', default=35.9, help='Integrated luminosity') #def:35.9
 (opts,args)=parser.parse_args()
 
@@ -43,7 +43,7 @@ plotDir  = trainDir.replace('trees','plots')
 if not path.isdir(plotDir): 
   system('mkdir -p %s'%plotDir)
 nJetClasses = 3
-nClasses = 9 #runs 0->8 in opt loop 
+nClasses = 9 
 catNames = ['0J low','0J high', '1J low', '1J med', '1J high', '2J low', '2J med', '2J high', 'BSM']
 binNames = ['0J low','0J high', '1J low', '1J med', '1J high', '2J low', '2J med', '2J high', 'BSM', 'VBF-like']
 jetPriors = [0.606560, 0.270464, 0.122976]
@@ -51,8 +51,6 @@ procPriors= [0.130697, 0.478718, 0.149646, 0.098105, 0.018315, 0.028550, 0.04031
 #lumiScale = 137./35.9
 #put root in batch mode
 r.gROOT.SetBatch(True)
-#bool to chose to scale to lumi other than 35.9
-scaleToLumi = False
 #For adding priors if using ML categorisation
 addPriors = False
 
@@ -61,9 +59,9 @@ procFileMap = {'Data':'Data.root'}
 theProcs = procFileMap.keys()
 
 #define the different sets of variables used
-diphoVars  = ['leadmva','subleadmva','leadptom','subleadptom',
-              'leadeta','subleadeta',
-              'CosPhi','vtxprob','sigmarv','sigmawv']
+diphoVars  = ['dipho_leadIDMVA','dipho_subleadIDMVA','dipho_lead_ptoM','dipho_sublead_ptoM',
+              'dipho_leadEta','dipho_subleadEta',
+              'CosPhi','vtxprob','sigmarv','sigmawv']   
 
 jetVars  = ['n_rec_jets','dijet_Mjj',
               'dijet_leadEta','dijet_subleadEta','dijet_subsubleadEta',
@@ -90,7 +88,7 @@ if not opts.dataFrame:
   for proc,fn in procFileMap.iteritems():
       trainFile   = r.TFile('%s/%s'%(trainDir,fn))
       if proc[-1].count('h') or 'vbf' in proc: trainTree = trainFile.Get('vbfTagDumper/trees/%s_125_13TeV_VBFDiJet'%proc)
-      else: trainTree = trainFile.Get('vbfTagDumper/trees/%s_13TeV_VBFDiJet'%proc)
+      else: trainTree = trainFile.Get('vbfTagDumper/trees/%s_13TeV_GeneralDipho'%proc)
       trainTree.SetBranchStatus('nvtx',0)
       trainTree.SetBranchStatus('VBFMVAValue',0)
       trainTree.SetBranchStatus('dZ',0)
@@ -107,7 +105,7 @@ if not opts.dataFrame:
       trainFrames[proc] = pd.DataFrame( tree2array(newTree) )
       del newTree
       del newFile
-      trainFrames[proc]['proc'] = proc #adds process label to each event. i.e. if we read in ggH, proc = ggH
+      trainFrames[proc]['proc'] = proc 
   print 'got trees'
  
   #create one total frame
@@ -119,30 +117,20 @@ if not opts.dataFrame:
   print 'created total frame'
   
   #then filter out the events into only those with the phase space we are interested in
-  dataTotal = dataTotal[dataTotal.CMS_hgg_mass>100.]
-  dataTotal = dataTotal[dataTotal.CMS_hgg_mass<180.]
+  dataTotal = dataTotal[dataTotal.dipho_mass>100.]
+  dataTotal = dataTotal[dataTotal.dipho_mass<180.]
   print 'done mass cuts'
   
   #some extra cuts that are applied for diphoton BDT in the AN
-  dataTotal = dataTotal[dataTotal.leadmva>-0.9]
-  dataTotal = dataTotal[dataTotal.subleadmva>-0.9]
-  dataTotal = dataTotal[dataTotal.leadptom>0.333]
-  dataTotal = dataTotal[dataTotal.subleadptom>0.25]
-  #remove STXS bins > 9 (at reco level! can still have gen contamination)
+  dataTotal = dataTotal[dataTotal.dipho_leadIDMVA>-0.9]
+  dataTotal = dataTotal[dataTotal.dipho_subleadIDMVA>-0.9]
+  dataTotal = dataTotal[dataTotal.dipho_lead_ptoM>0.333]
+  dataTotal = dataTotal[dataTotal.dipho_sublead_ptoM>0.25]
   dataTotal = dataTotal[dataTotal.dijet_Mjj<350]
   print 'done basic preselection cuts'
-  
-  #Change the backgroung weights if we want to scale to higher/lower lumi:
-  if(scaleToLumi==True):
-    print('Scaling background to alternative lumi. First weights before scaling:')
-    print(dataTotal['weight'].head(5))
-    dataTotal['weight'] = dataTotal['weight']*lumiScale
-    print('Weights after scaling:')
-    print(dataTotal['weight'].head(5))
 
   #add extra info to dataframe
   print 'about to add extra columns'
-
   dataTotal['diphopt'] = dataTotal.apply(addPt, axis=1)
   dataTotal['reco'] = dataTotal.apply(reco, axis=1)
   print 'all columns added'
@@ -162,14 +150,14 @@ else:
 
 # Do same thing for the MC signal dataframe
 if not opts.signifFrame:
-  #sigFileMap = {'ggh':'ggH.root'}
-  sigFileMap = {'ggh':'Merged.root'}
+  sigFileMap = {'ggh':'ggH_amc.root'} #used for 2017
+  #sigFileMap = {'ggh':'Merged.root'} #used for 2016
   trainFrames = {}
   #get the trees, turn them into arrays
   for proc,fn in sigFileMap.iteritems():
       trainFile   = r.TFile('%s/%s'%(trainDir,fn))
       if proc[-1].count('h') or 'vbf' in proc:
-        trainTree = trainFile.Get('vbfTagDumper/trees/%s_125_13TeV_VBFDiJet'%proc)
+        trainTree = trainFile.Get('vbfTagDumper/trees/%s_125_13TeV_GeneralDipho'%proc)
       else:
         trainTree = trainFile.Get('vbfTagDumper/trees/%s_13TeV_VBFDiJet'%proc)
       trainTree.SetBranchStatus('nvtx',0)
@@ -189,7 +177,7 @@ if not opts.signifFrame:
       newFile = r.TFile('/vols/cms/es811/Stage1categorisation/trainTrees/new.root','RECREATE')
       newTree = trainTree.CloneTree()
       trainFrames[proc] = pd.DataFrame( tree2array(newTree) )
-      del newTree # remove this if going to use the tree for a 2D histo 
+      del newTree 
       del newFile
       trainFrames[proc]['proc'] = proc
   print 'got trees'
@@ -203,34 +191,26 @@ if not opts.signifFrame:
   print 'created total frame'
   
   #then filter out the events into only those with the phase space we are interested in
-  trainTotal = trainTotal[trainTotal.CMS_hgg_mass>100.]
-  trainTotal = trainTotal[trainTotal.CMS_hgg_mass<180.]
+  trainTotal = trainTotal[trainTotal.dipho_mass>100.]
+  trainTotal = trainTotal[trainTotal.dipho_mass<180.]
   print 'done mass cuts'
   
   #some extra cuts that are applied for diphoton BDT in the AN
-  trainTotal = trainTotal[trainTotal.leadmva>-0.9]
-  trainTotal = trainTotal[trainTotal.subleadmva>-0.9]
-  trainTotal = trainTotal[trainTotal.leadptom>0.333]
-  trainTotal = trainTotal[trainTotal.subleadptom>0.25]
-  trainTotal = trainTotal[trainTotal.stage1cat>-1.]
+  trainTotal = trainTotal[trainTotal.dipho_leadIDMVA>-0.9]
+  trainTotal = trainTotal[trainTotal.dipho_subleadIDMVA>-0.9]
+  trainTotal = trainTotal[trainTotal.dipho_lead_ptoM>0.333]
+  trainTotal = trainTotal[trainTotal.dipho_sublead_ptoM>0.25]
   #remove STXS bins > 9 at reco level! can still have gen contamination
-  trainTotal = trainTotal[trainTotal.dijet_Mjj<350] 
+  trainTotal = trainTotal[trainTotal.dijet_Mjj<350] #new-ish cut to remove high mjj events
   
-  #remove bkg then add reco tag info
-  #trainTotal = trainTotal[trainTotal.stage1cat>0.01]
-  #trainTotal = trainTotal[trainTotal.stage1cat<12.]
-  #trainTotal = trainTotal[trainTotal.stage1cat!=1]
-  #trainTotal = trainTotal[trainTotal.stage1cat!=2]
-
   # updated to reco for 1.1 and remove bin -1 (filled when no other bins satisfied)
   print 'About to add reco tag info'
   trainTotal['diphopt'] = trainTotal.apply(addPt, axis=1)
   trainTotal['reco'] = trainTotal.apply(reco, axis=1)
   trainTotal = trainTotal[trainTotal.reco!=-1]
   trainTotal['truthDipho'] = trainTotal.apply(truthDipho, axis=1)
-  trainTotal['truthClass'] = trainTotal.apply(truthClass, axis=1)
-  #FIXME: temporary debug
-  trainTotal = trainTotal[trainTotal.truthClass<9]
+  trainTotal['truthClass'] = trainTotal.apply(truthClass1p1, axis=1)
+  trainTotal = trainTotal[trainTotal.truthClass>-1] #remove events not in acceptance
   print 'Successfully added reco tag info'
 
   #save
@@ -256,8 +236,7 @@ diphoJ  = trainTotal['truthClass'].values
 diphoFW = trainTotal['weight'].values
 diphoP  = trainTotal['diphopt'].values
 diphoR  = trainTotal['reco'].values
-diphoM  = trainTotal['CMS_hgg_mass'].values
-diphoMVA= trainTotal['diphomvaxgb'].values
+diphoM  = trainTotal['dipho_mass'].values
 
 if (opts.className):
   if 'Jet' in opts.className:
@@ -269,8 +248,7 @@ dataY  = np.zeros(dataX.shape[0])
 dataFW = dataTotal['weight'].values
 dataP  = dataTotal['diphopt'].values
 dataR  = dataTotal['reco'].values
-dataM  = dataTotal['CMS_hgg_mass'].values
-dataMVA= dataTotal['diphomvaxgb'].values
+dataM  = dataTotal['dipho_mass'].values
 
 #setup matrices for predicting dipho (BG rejection BDT)
 diphoMatrix = xg.DMatrix(diphoX, label=diphoY, weight=diphoFW, feature_names=diphoVars)
@@ -284,11 +262,22 @@ diphoModel.load_model('%s/%s'%(modelDir,opts.modelName))
 diphoPredY = diphoModel.predict(diphoMatrix)
 dataPredY  = diphoModel.predict(dataMatrix)
 
+
+print('reco categorisation debug:')
+print(trainTotal[['diphopt','n_jet_30','dijet_Mjj','reco']])
+print('gen categorisation debug:')
+print(trainTotal[['diphopt','n_jet_30','dijet_Mjj','reco','truthClass']])
+
+# append new BDT scores to dataframe for use in purity matrix scripts
+dfForDiphoBDTPurityMatrices = pd.concat([pd.DataFrame(diphoR), pd.DataFrame(diphoJ), pd.DataFrame(diphoFW), pd.DataFrame(diphoPredY)], axis=1)
+dfForDiphoBDTPurityMatrices.to_pickle('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/picklesForPurity/reco.pkl')
+
+
 print('reco accuracy score is:')
 recoScore = accuracy_score(diphoJ, diphoR, sample_weight=diphoFW)
 print(recoScore)
+
 #load the classifier model to be tested, if it exists
-#only trained the model to predict 9 categories, so exclude these from cats but keep in gen bins (purity mat)
 if opts.className:
   #BDTs
   classModel = xg.Booster()
@@ -308,8 +297,8 @@ if opts.className:
     #save predicted signal classes for use in purity matrices
     print('nJet BDT accuracy score is:')
     print(accuracy_score(diphoJ, diphoR, sample_weight=diphoFW))
-    dfForDiphoBDTPurityMatrices = pd.concat([pd.DataFrame(diphoR), pd.DataFrame(diphoJ), pd.DataFrame(diphoFW), pd.DataFrame(diphoMVA)], axis=1)
-    dfForDiphoBDTPurityMatrices.to_pickle('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/diphoBDTCutsForMLCat/nJetBDT/BDTPredictedCategoriesSqrtEQWeights.pkl')
+    dfForDiphoBDTPurityMatrices = pd.concat([pd.DataFrame(diphoR), pd.DataFrame(diphoJ), pd.DataFrame(diphoFW), pd.DataFrame(diphoPredY)], axis=1)
+    dfForDiphoBDTPurityMatrices.to_pickle('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/picklesForPurity/nJetBDT.pkl')
       
     #same thing for background
     classDataMatrix = xg.DMatrix(dataI, label=dataY, weight=dataFW, feature_names=jetVars)
@@ -328,6 +317,8 @@ if opts.className:
     diphoR = np.argmax(predProbJet, axis=1)
     print('nClasses BDT accuracy score:')
     print(accuracy_score(diphoJ, diphoR, sample_weight=diphoFW))
+    dfForDiphoBDTPurityMatrices = pd.concat([pd.DataFrame(diphoR), pd.DataFrame(diphoJ), pd.DataFrame(diphoFW), pd.DataFrame(diphoPredY)], axis=1)
+    dfForDiphoBDTPurityMatrices.to_pickle('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/picklesForPurity/nClassBDT.pkl')
  
     #same thing for background (no need to save for purits matrices though)
     classDataMatrix = xg.DMatrix(dataI, label=dataY, weight=dataFW, feature_names=allVars)
@@ -355,9 +346,7 @@ if not path.isdir(plotDir):
 
 for iClass in range(nClasses):
   sigWeights = diphoFW * (diphoJ==iClass) * (diphoR==iClass)
-  #NSignalEvents.append(sigWeights.sum()*35.9)
   bkgWeights = dataFW * (dataR==iClass)
-  #NBackgroundEvents.append(bkgWeights.sum())
   optimiser = CatOptim(sigWeights, diphoM, [diphoPredY], bkgWeights, dataM, [dataPredY], 2, ranges, names)
   #optimiser.setTransform(True) #FIXME
   optimiser.optimise(opts.intLumi, opts.nIterations, iClass)
@@ -373,16 +362,6 @@ for iClass in range(nClasses):
     BDTStr += '\n'
     Sig = float(splits[2][-9:-3])
  
-    ''' 
-    # For doing lumi scaling for combined and non combined. (Just care about 2016 only for now though)
-    if(scaleToLumi == True):
-      SigStr += '%f'%Sig
-      SigStr += '\n'
-    else:
-      SigStr += '%f'%(Sig*(math.sqrt(lumiScale)))
-      SigStr += '\n' 
-     '''
-
     SigStr += '%f'%Sig
     SigStr += '\n'
     sigList.append(Sig)
@@ -391,20 +370,8 @@ for iClass in range(nClasses):
     sigList.append(0)
 
 
-#No bins requiring 3 cats for 1.1
-#binsRequiringThree = [0] 
-#for iClass in binsRequiringThree:
-  #sigWeights = diphoFW * (diphoJ==iClass) * (diphoR==iClass)
-  #bkgWeights = dataFW * (dataR==iClass)
-  #optimiser = CatOptim(sigWeights, diphoM, [diphoPredY], bkgWeights, dataM, [dataPredY], 3, ranges, names)
-  #optimiser.setTransform(True) #FIXME
-  #optimiser.optimise(opts.intLumi, opts.nIterations)
-  #printStr += 'Results for bin %g : \n'%iClass
-  #printStr += optimiser.getPrintableResult()
-
-
-#print(NSignalEvents)
-#print(NBackgroundEvents)
+print(NSignalEvents)
+print(NBackgroundEvents)
 
 print
 print printStr
@@ -413,19 +380,9 @@ print('Accuracy is:')
 print(accuracy_score(diphoJ, diphoR, sample_weight=diphoFW))
 
 #print the cuts to the files for use in analysis.py later (plotting confusion matrices using these cuts)
-'''
-#NOTE: These both print cuts/sigs for scaling to 137fb^-1. If you want it for 2016,
-#NOTE: run on 36.9 without background scaling, and look at BDT cuts file (indiv). Sigs will
-#NOTE: change since we multiply by sqrt(alpha), b ut BDT cuts do not, as found through earlier opt. 
-if(scaleToLumi==True):
-  BDTCutFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/BDTCutsComb.txt','w+')
-  BDTCutFile.write('%s'%BDTStr)
-  BDTCutFile.close()
-  CatSigsFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/CatSigsComb.txt','w+')
-  CatSigsFile.write('%s'%SigStr)
-  CatSigsFile.close()
 
-else:
+'''
+#print cuts/sigs ,
   BDTCutFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/BDTCutsIndiv.txt','w+')
   BDTCutFile.write('%s'%BDTStr)
   BDTCutFile.close()

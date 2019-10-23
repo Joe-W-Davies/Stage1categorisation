@@ -6,8 +6,8 @@ r.gROOT.SetBatch(True)
 from root_numpy import fill_hist
 import usefulStyle as useSty
 
-plotDir = '/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/debug/nJetNNMgamgamWITHDiphotBDT'
-#plotDir = '/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/debug/recoPlotsWithFits'
+#plotDir = '/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/debug/nJetNNMgamgamWITHDiphotBDT'
+plotDir = '/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/debug/recoPlotsWithFits'
 
 f_output = r.TFile.Open("DEBUGhist.root","RECREATE") 
 
@@ -211,7 +211,7 @@ class CatOptim:
                 #print('total AMS %.3f' % AMStot)
               else: 
                 AMStot = 0.0 
-      else:
+      else: #do usual optimisation for other categories
        for iCat in range(self.nCats): #number of sub-cats we are splitting the cat into
          lastCat = (iCat+1 == self.nCats) #boolean, set to true if on last cat
          sigWeights = self.sigWeights
@@ -247,15 +247,17 @@ class CatOptim:
          bkgs.append(bkgCount)
          nons.append(nonSigCount)
        if self.bests.update(sigs, bkgs, nons):
+
          #DEBUG: print best fits
-         #r.gStyle.SetOptStat(1111)
-         #canv = r.TCanvas()
-         #sigHist.Draw()
-         #canv.Print('%s/signalHistCat%i.pdf' % (plotDir,classNo)) #will overwrite until best is stored
-         #bkgHist.Draw()
-         #canv.Print('%s/backgroundHistCat%i.pdf' % (plotDir,classNo)) #will overwrite until best is stored
-         #with open('%s/fitInfoCat%i.txt' %(plotDir,classNo),'w+') as f: 
-         #  f.write('Info: \n sigWidth: %.2f \n signal: %.6f \n background: %.6f'%(sigWidth,sigCount,bkgCount))  
+         r.gStyle.SetOptStat(1111)
+         canv = r.TCanvas()
+         sigHist.Draw()
+         canv.Print('%s/signalHistCat%i.pdf' % (plotDir,classNo)) #will overwrite until best is stored
+         bkgHist.Draw()
+         canv.Print('%s/backgroundHistCat%i.pdf' % (plotDir,classNo)) #will overwrite until best is stored
+         with open('%s/fitInfoCat%i.txt' %(plotDir,classNo),'w+') as f: 
+           f.write('Info: \n sigWidth: %.2f \n signal: %.6f \n background: %.6f'%(sigWidth,sigCount,bkgCount))  
+
          #end of debug
          for name in self.names:
            self.boundaries[name] = cuts[name]

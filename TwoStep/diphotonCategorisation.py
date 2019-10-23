@@ -8,6 +8,10 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import pickle
 from sklearn.metrics import roc_auc_score, roc_curve
+from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import StratifiedKFold
+
+import os
 from os import path, system
 
 from addRowFunctions import addPt, truthDipho, reco, diphoWeight, altDiphoWeight
@@ -32,16 +36,19 @@ frameDir = trainDir.replace('trees','frames')
 if opts.trainParams: opts.trainParams = opts.trainParams.split(',')
 trainFrac = 0.7
 #validFrac = 0.1 #NOTE: we don't do the validation, so test on 30% of data 
+np.random.seed(86421)
+weightScale= False
 
 #get trees from files, put them in data frames
-#procFileMap = {'ggh':'ggH.root', 'vbf':'VBF.root', 'tth':'ttH.root', 'wzh':'VH.root', 'dipho':'Dipho.root', 'gjet':'GJet.root', 'qcd':'QCD.root'}
-procFileMap = {'ggh':'powheg_ggH.root', 'vbf':'powheg_VBF.root', 'tth':'powheg_ttH.root', 
-               'dipho':'Dipho.root', 'gjet_promptfake':'GJet_pf.root', 'gjet_fakefake':'GJet_ff.root', 'qcd_promptfake':'QCD_pf.root', 'qcd_fakefake':'QCD_ff.root'}
+#NOTE: ttH file not available for 2017 so just train without this signal. Also dc about VH as small x-sec
+procFileMap = {'ggh':'ggH.root', 'vbf':'VBF.root', 'dipho':'Dipho.root', 'gjet':'GJet.root', 'qcd':'QCD.root'}
+#procFileMap = {'ggh':'powheg_ggH.root', 'vbf':'powheg_VBF.root', 'tth':'powheg_ttH.root', 
+               #'dipho':'Dipho.root', 'gjet_promptfake':'GJet_pf.root', 'gjet_fakefake':'GJet_ff.root', 'qcd_promptfake':'QCD_pf.root', 'qcd_fakefake':'QCD_ff.root'}
 theProcs = procFileMap.keys()
 
 #define the different sets of variables used
-diphoVars  = ['leadmva','subleadmva','leadptom','subleadptom',
-              'leadeta','subleadeta',
+diphoVars  = ['dipho_leadIDMVA','dipho_subleadIDMVA','dipho_lead_ptoM','dipho_sublead_ptoM',
+              'dipho_leadEta','dipho_subleadEta',
               'CosPhi','vtxprob','sigmarv','sigmawv']
 
 #either get existing data frame or create it
@@ -50,9 +57,11 @@ if not opts.dataFrame:
   trainFrames = {}
   #get the trees, turn them into arrays
   for proc,fn in procFileMap.iteritems():
+      print('reading tree for proc: %s' % proc)
       trainFile   = r.TFile('%s/%s'%(trainDir,fn))
-      if proc[-1].count('h') or 'vbf' in proc: trainTree = trainFile.Get('vbfTagDumper/trees/%s_125_13TeV_VBFDiJet'%proc)
-      else: trainTree = trainFile.Get('vbfTagDumper/trees/%s_13TeV_VBFDiJet'%proc)
+      if proc[-1].count('h') or 'vbf' in proc: trainTree = trainFile.Get('vbfTagDumper/trees/%s_125_13TeV_GeneralDipho'%proc)
+      elif 'dipho' in proc: trainTree = trainFile.Get('vbfTagDumper/trees/%s_13TeV_GeneralDipho'%proc)
+      else: trainTree = trainFile.Get('vbfTagDumper/trees/%s_anyfake_13TeV_GeneralDipho'%proc)
       trainTree.SetBranchStatus('nvtx',0)
       trainTree.SetBranchStatus('VBFMVAValue',0)
       trainTree.SetBranchStatus('dijet_*',0)
@@ -83,17 +92,24 @@ if not opts.dataFrame:
   print 'created total frame'
   
   #then filter out the events into only those with the phase space we are interested in
-  trainTotal = trainTotal[trainTotal.CMS_hgg_mass>100.]
-  trainTotal = trainTotal[trainTotal.CMS_hgg_mass<180.]
+  trainTotal = trainTotal[trainTotal.dipho_mass>100.]
+  trainTotal = trainTotal[trainTotal.dipho_mass<180.]
   print 'done mass cuts'
   
   #some extra cuts that are applied for diphoton BDT in the AN
-  trainTotal = trainTotal[trainTotal.leadmva>-0.9]
-  trainTotal = trainTotal[trainTotal.subleadmva>-0.9]
-  trainTotal = trainTotal[trainTotal.leadptom>0.333]
-  trainTotal = trainTotal[trainTotal.subleadptom>0.25]
-  trainTotal = trainTotal[trainTotal.stage1cat>-1.]
+  trainTotal = trainTotal[trainTotal.dipho_leadIDMVA>-0.9]
+  trainTotal = trainTotal[trainTotal.dipho_subleadIDMVA>-0.9]
+  trainTotal = trainTotal[trainTotal.dipho_lead_ptoM>0.333]
+  trainTotal = trainTotal[trainTotal.dipho_sublead_ptoM>0.25]
+  trainTotal = trainTotal[trainTotal.HTXSstage1_1cat!=100]
   print 'done basic preselection cuts'
+
+  if weightScale:
+    print('MC weights before were:')
+    print(trainTotal['weight'].head(10))
+    trainTotal.loc[:,'weight'] *= 1000
+    print('weights after scaling are:') 
+    print(trainTotal['weight'].head(10))
   
   #add extra info to dataframe
   print 'about to add extra columns'
@@ -111,18 +127,14 @@ if not opts.dataFrame:
 #read in dataframe if above steps done before
 else:
   trainTotal = pd.read_pickle('%s/%s'%(frameDir,opts.dataFrame))
-  print 'Successfully loaded the dataframe'
+  print 'Successfully loaded the dataframe: %s/%s' % (frameDir,opts.dataFrame)
 
-sigSumW = np.sum( trainTotal[trainTotal.stage1cat>0.01]['weight'].values )
-bkgSumW = np.sum( trainTotal[trainTotal.stage1cat==0]['weight'].values )
+sigSumW = np.sum( trainTotal[trainTotal.HTXSstage1cat>0.01]['weight'].values )
+bkgSumW = np.sum( trainTotal[trainTotal.HTXSstage1cat==0]['weight'].values )
 print 'sigSumW %.6f'%sigSumW
 print 'bkgSumW %.6f'%bkgSumW
 print 'ratio %.6f'%(sigSumW/bkgSumW)
 #exit('first just count the weights')
-
-#print(trainTotal['diphoWeight'].head(20))
-#print(trainTotal['altDiphoWeight'].head(20))
-#print(trainTotal['weight'].head(20))
 
 #define the indices shuffle (useful to keep this separate so it can be re-used)
 theShape = trainTotal.shape[0]
@@ -136,49 +148,7 @@ diphoY  = trainTotal['truthDipho'].values
 diphoTW = trainTotal['diphoWeight'].values #weights for training sample
 diphoAW = trainTotal['altDiphoWeight'].values #alternative weights for training sample
 diphoFW = trainTotal['weight'].values #weights for test sample
-diphoM  = trainTotal['CMS_hgg_mass'].values
-
-#setup the pandas datasets for the CV grid search
-#modTrainTotal = trainTotal
-#modWeights = (trainTotal['diphoWeight']*10).round().astype(int)
-
-
-
-#Debugging#
-#print('The shape of modWeights (column) is:')
-#print(modWeights.shape)
-#print('The shape of modTrainTotal design matrix is:')
-#print(modTrainTotal.shape)
-#print('The first few modWeights entries are:')
-#print(modWeights.head())
-#print('The first few modTrainTotal entries are:')
-#print(modTrainTotal.head())
-
-#print('modTrainTotal.iloc[0] is:')
-#print(modTrainTotal.iloc[0,:])
-
-#print('modWeights.iloc[0] is:')
-#print(modWeights.iloc[0]) 
-
-#try printing out the data types for the row and for the design matrix to see if one is a numpy array and one is a pandas series, and so incompatible.
-#print('modTrainTotal is of data type:')
-#print(type(modTrainTotal))
-
-#print('modWeights is of data type:')
-#print(type(modWeights))
-# End of debugging #
-
-#print('The number of rows before augmentation was: %i'%(trainTotal.shape[0]))
-
-#print('About to append to training matrix...')
-#Append the column x times, where x is the weight (scaled to an integer)
-#for i in range(trainTotal.shape[0]):  
-  #if(modWeights.iloc[i] !=0):
-    #if(i%100 == 0): print'Done next 100 events'
-    #modTrainTotal = modTrainTotal.append([modTrainTotal.iloc[i,:]]*modWeights.iloc[i],ignore_index=True)
-
-#print('Appending finished')
-#print('The number of rows after augmentation is: %i' %(modTrainTotal.shape[0]))
+diphoM  = trainTotal['dipho_mass'].values
 
 del trainTotal
 
@@ -213,56 +183,102 @@ if opts.trainParams:
       trainParams[key] = data
       paramExt += '%s_%s__'%(key,data)
     paramExt = paramExt[:-2] 
+
+#cross validate and chose models that gives smallest out of fold prediction error
+#print 'starting cross validation'
+#cvResult = xg.cv(trainParams, trainingDipho, num_boost_round=2000,  nfold = 4, early_stopping_rounds = 20, stratified = True, verbose_eval=True)                                                                   
+#print('Best number of trees = {}'.format(cvResult.shape[0]))
+#trainParams['n_estimators'] = cvResult.shape[0]
+
 print 'about to train diphoton BDT with hyperparameters:%s'%(trainParams)
 diphoModel = xg.train(trainParams, trainingDipho)
 print 'done'
 
-#save it
+#save it if not doing HP optimisation
 modelDir = trainDir.replace('trees','models')
 if not path.isdir(modelDir):
   system('mkdir -p %s'%modelDir)
+
 diphoModel.save_model('%s/diphoModel%s.model'%(modelDir,paramExt))
 print 'saved as %s/diphoModel%s.model'%(modelDir,paramExt)
 
+
 #build same thing but with equalised weights
 altTrainingDipho = xg.DMatrix(diphoTrainX, label=diphoTrainY, weight=diphoTrainAW, feature_names=diphoVars)
+#cross validate again for other alt model
+#print 'starting cross validation'
+#cvResult = xg.cv(trainParams, altTrainingDipho, num_boost_round=2000,  nfold = 4, early_stopping_rounds = 20, stratified = True, verbose_eval=True)                                                                   
+#print('Best number of trees = {}'.format(cvResult.shape[0]))
+#trainParams['n_estimators'] = cvResult.shape[0]
+
+
+
 print 'about to train alternative diphoton BDT with hyperparameters:%s'%(trainParams)
 altDiphoModel = xg.train(trainParams, altTrainingDipho)
 print 'done'
 
-#save it
+#save it if not doing HP optimisation
+
 altDiphoModel.save_model('%s/altDiphoModel%s.model'%(modelDir,paramExt))
 print 'saved as %s/altDiphoModel%s.model'%(modelDir,paramExt)
+
 
 #check performance of each training
 diphoPredYxcheck = diphoModel.predict(trainingDipho)
 diphoPredY = diphoModel.predict(testingDipho)
+normROCtrain = roc_auc_score(diphoTrainY, diphoPredYxcheck, sample_weight=diphoTrainFW)
+normROCtest = roc_auc_score(diphoTestY, diphoPredY, sample_weight=diphoTestFW)
 print 'Default training performance:'
-print 'area under roc curve for training set = %1.3f'%( roc_auc_score(diphoTrainY, diphoPredYxcheck, sample_weight=diphoTrainFW) )
-print 'area under roc curve for test set     = %1.3f'%( roc_auc_score(diphoTestY, diphoPredY, sample_weight=diphoTestFW) )
+print 'area under roc curve for training set = %1.3f'%(normROCtrain)
+print 'area under roc curve for test set     = %1.3f'%(normROCtest)
 
 altDiphoPredYxcheck = altDiphoModel.predict(trainingDipho)
 altDiphoPredY = altDiphoModel.predict(testingDipho)
+altROCtrain = roc_auc_score(diphoTrainY, altDiphoPredYxcheck, sample_weight=diphoTrainFW)
+altROCtest = roc_auc_score(diphoTestY, altDiphoPredY, sample_weight=diphoTestFW)
 print 'Alternative training performance:'
-print 'area under roc curve for training set = %1.3f'%( roc_auc_score(diphoTrainY, altDiphoPredYxcheck, sample_weight=diphoTrainFW) )
-print 'area under roc curve for test set     = %1.3f'%( roc_auc_score(diphoTestY, altDiphoPredY, sample_weight=diphoTestFW) )
+print 'area under roc curve for training set = %1.3f'%(altROCtrain)
+print 'area under roc curve for test set     = %1.3f'%(altROCtest)
+
 
 #save roc_auc and associated HPs for test and train sets iff better than other ones in text file
-rocFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/rocOutputs/normRocs.txt','a+')  
-bestHPFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/rocOutputs/bestNormHPs.txt','a+')  
-lines = rocFile.readlines()
-rocScores = []
-for line in lines:
-  rocScores.append(float(line))
-print 'Norm roc list before appending:'
-print rocScores
-if(roc_auc_score(diphoTestY, diphoPredY, sample_weight=diphoTestFW) > rocScores[-1]):
-  rocFile.write('%1.3f\n' % roc_auc_score(diphoTestY, diphoPredY, sample_weight=diphoTestFW))
-  print 'best value so far. Appending to NORM file'
-  bestHPFile.write('HPs: %s --> roc_auc: %1.3f \n' % (trainParams, roc_auc_score(diphoTestY, diphoPredY, sample_weight=diphoTestFW)))
-rocFile.close()
-bestHPFile.close()
+#check if the dir and file exists.  
+if not path.isdir('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/diphoROCOutputs'): 
+ system('mkdir -p /vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/diphoROCOutputs')
+if not path.isfile('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/normROC_and_HP.txt'):
+ system('touch /vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/diphoROCOutputs/normROC_and_HP.txt')
+with open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/diphoROCOutputs/normROC_and_HP.txt','a+') as bestHPfile: 
+  lines = bestHPfile.readlines()
+  rocScores = []
+  if len(lines) == 0: rocScores.append(0.000) 
+  else:
+    for line in lines:
+      rocScores.append(float(line[:5]))
+  print 'Norm roc list before appending:'
+  print rocScores
+  if(roc_auc_score(diphoTestY, diphoPredY, sample_weight=diphoTestFW) > rocScores[-1]) and (abs(normROCtrain - normROCtest)<0.01):
+    print 'Difference between normal train and test scores: %1.3f not too large' % (abs(normROCtrain - normROCtest))
+    print 'best value so far. Appending to file'
+    bestHPfile.write('%1.3f  (ROC auc) HPs: %s \n' % (normROCtest,trainParams))
 
+#same thing for alt model
+if not path.isfile('%s/altROC_and_HP.txt' % os.getcwd()):
+ system('touch /vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/diphoROCOutputs/altROC_and_HP.txt')
+with open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/diphoROCOutputs/altROC_and_HP.txt', 'a+') as bestHPfile: 
+  lines = bestHPfile.readlines()
+  rocScores = []
+  if len(lines) == 0: rocScores.append(0.000) 
+  else:
+    for line in lines:
+      rocScores.append(float(line[:5]))
+  print 'Alt roc list before appending:'
+  print rocScores
+  if(roc_auc_score(diphoTestY, altDiphoPredY, sample_weight=diphoTestFW) > rocScores[-1]) and (abs(altROCtrain - altROCtest)<0.01):
+    print 'Difference between alt train and test scores not too large: %1.3f' % (abs(altROCtrain - altROCtest))
+    print 'best value so far. Appending to file'
+    bestHPfile.write('%1.3f  (ROC auc). HPs: %s \n' % (altROCtest,trainParams))
+
+'''
 #same thing for alt model
 altRocFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/rocOutputs/altRocs.txt','a+')  
 altBestHPFile=open('/vols/build/cms/jwd18/BDT/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/rocOutputs/bestAltHPs.txt','a+')  
@@ -278,7 +294,7 @@ if(roc_auc_score(diphoTestY, altDiphoPredY, sample_weight=diphoTestFW) > altRocS
   altBestHPFile.write('HPs: %s --> roc_auc: %1.3f \n' % (trainParams,roc_auc_score(diphoTestY, altDiphoPredY, sample_weight=diphoTestFW)))
 altRocFile.close()
 altBestHPFile.close()
-
+'''
 
 #exit("Plotting not working for now so exit")
 #make some plots 
@@ -309,7 +325,7 @@ xg.plot_importance(altDiphoModel)
 #plt.show()
 plt.savefig('%s/altDiphoImportances.pdf'%plotDir)
 
-#draw sig vs background distribution
+#draw sig vs background distribution (MC weights BDT)
 nOutputBins = 50
 theCanv = useSty.setCanvas()
 sigScoreW = diphoTestFW * (diphoTestY==1)
@@ -333,8 +349,9 @@ theCanv.SaveAs('%s/sigScore.pdf'%plotDir)
 bkgScoreHist.SetLineColor(r.kRed)
 bkgScoreHist.Draw('hist')
 useSty.drawCMS()
-useSty.drawEnPu(lumi='35.9 fb^{-1}')
+useSty.drawEnPu(lumi='%2.1f fb^{-1}'%opts.intLumi)
 theCanv.SaveAs('%s/bkgScore.pdf'%plotDir)
+theCanv.Close()
 
 #apply transformation to flatten ggH
 for iBin in range(1,nOutputBins+1):
@@ -353,10 +370,10 @@ sigScoreHist.Draw('hist')
 bkgScoreHist.SetLineColor(r.kRed)
 bkgScoreHist.Draw('hist,same')
 useSty.drawCMS()
-useSty.drawEnPu(lumi='35.9 fb^{-1}')
+useSty.drawEnPu(lumi='%2.1f fb^{-1}'%opts.intLumi)
 theCanv.SaveAs('%s/outputScores.pdf'%plotDir)
 
-#draw sig vs background distribution
+#draw sig vs background distribution (alt BDT)
 theCanv = useSty.setCanvas()
 sigScoreW = diphoTestFW * (diphoTestY==1)
 sigScoreHist = r.TH1F('sigScoreHist', 'sigScoreHist', nOutputBins, 0., 1.)
@@ -374,7 +391,7 @@ fill_hist(bkgScoreHist, altDiphoPredY, weights=bkgScoreW)
 sigScoreHist.SetLineColor(r.kBlue)
 sigScoreHist.Draw('hist')
 useSty.drawCMS()
-useSty.drawEnPu(lumi='35.9 fb^{-1}')
+useSty.drawEnPu(lumi='%2.1f fb^{-1}'%opts.intLumi)
 theCanv.SaveAs('%s/altSigScore.pdf'%plotDir)
 bkgScoreHist.SetLineColor(r.kRed)
 bkgScoreHist.Draw('hist')

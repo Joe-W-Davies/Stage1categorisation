@@ -15,11 +15,11 @@ myDir = getcwd()
 baseDir = '/vols/cms/jwd18/Stage1categorisation/Pass1'
 #years = ['2016','2017']
 
-years = ['2016']
-intLumi = 35.9
+#years = ['2016']
+#intLumi = 35.9
 
-#years = ['2017']
-#intLumi = 41.5
+years = ['2017']
+intLumi = 41.5
 
 #To get a general idea of Hps, We are going to test 30 scenarios for three hyperparameters. 
 #Each will have a "low", "medium", and "high" value, leading to
@@ -39,30 +39,37 @@ intLumi = 35.9
 script    = 'diphotonCategorisation.py'
 #param sets chosen randomly and submitted
 #paramSets = []
-#nIters = 2000
-#nParams = 7
+#nIters = 3000
+#nParams = 8
 
 #for i in range(nIters):
 #  paramSets.append('eta:%.2f' % np.random.uniform(0.05, 0.8))
-#  paramSets.append('gamma:%.2f' % np.random.uniform(0,5))
-#  paramSets.append('max_depth:%g' %np.random.randint(3,15))  
-#  paramSets.append('subsample:%.2f' %np.random.uniform(0.6,1))  
-#  paramSets.append('min_child_weight:%g' %np.random.randint(0,10))  
+#  paramSets.append('gamma:%.2f' % np.random.uniform(0,2))
+#  paramSets.append('colsample_bytree:%.2f' % np.random.uniform(0.5,1))
+#  paramSets.append('max_depth:%g' % np.random.randint(3,15))  
+#  paramSets.append('subsample:%f' % np.random.uniform(0.8,1))  
+#  paramSets.append('min_child_weight:%g' % np.random.randint(2,15))  
+#  paramSets.append('lambda:%f' % np.random.uniform(0.1,2))
+#  paramSets.append('n_estimators:%g' % np.random.randint(100,1500))
 
 #paramSets = [
 #  ",".join(paramSets[i:i+nParams])
 #  for i in xrange(0, len(paramSets), nParams)
 #]
 
-paramSets = ['min_child_weight:5,subsample:0.847204,eta:0.75,max_depth:7,gamma:2.05'] #bestHPs
+#paramSets = ['min_child_weight:5,subsample:0.847204,eta:0.75,max_depth:7,gamma:2.05'] #bestHPs 2016 (alt)
+#paramSets = ['colsample_bytree:0.72,min_child_weight:2,subsample:0.959875,eta:0.79,max_depth:9,gamma:0.18,lambda:0.339368'] #best HPs 2017 (alt)
+#paramSets = ['colsample_bytree:0.75,min_child_weight:4,subsample:0.817366,eta:0.80,max_depth:14,gamma:0.02,lambda:0.386300']
+paramSets = [None] 
 models = None
 classModel = None
-#dataFrame = 'trainTotal.pkl'
-dataFrame = None
+dataFrame = 'trainTotal.pkl'
+#dataFrame = None
 sigFrame  = None
 #NOTE:end of dipho random opt
+'''
 
-
+'''
 #NOTE: Bayesian optimiser for diphoton BDT. HP ranges specified in the script
 #script = 'BayesDiphotonCategorisation.py'
 #paramSets = [None]
@@ -288,9 +295,9 @@ sigFrame  = None
 #NOTE: Current implementation for ggH sigs with optional BDT
 
 script    = 'dataSignificances.py'
-models    = ['altDiphoModel__min_child_weight_5subsample_0.847204eta_0.75max_depth_7gamma_2.05.model'] 
+models    = ['altDiphoModel.model'] 
 paramSets = [None] # no effect here, just for submission to work
-#classModel = None #reco only
+classModel = None #reco only
 #best nJet Models
 #classModel = 'nJetModelWithMCWeights__min_child_weight_2__n_estimators_207__subsample_0.8920__eta_0.72__colsample_bytree_0.9__max_depth_14__gamma_0.01__lambda_0.9671.model' #best nJet W_mc model
 #classModel = 'nJetModelWithEQWeights__min_child_weight_7__n_estimators_133__subsample_0.8151__eta_0.65__colsample_bytree_0.85__max_depth_8__gamma_0.08__lambda_0.1662.model' #best nJet W_eq model
@@ -299,7 +306,7 @@ paramSets = [None] # no effect here, just for submission to work
 #classModel = 'nJetModelWithNoWeights__min_child_weight_9__n_estimators_21__subsample_0.8943__eta_0.53__colsample_bytree_0.97__max_depth_7__gamma_2.00__lambda_0.7469.model' #best njet no weight model
 
 #best nClass Models 
-classModel = 'nClassesModelMCWeights___min_child_weight_13__n_estimators_18__sub_sample_0.9030__eta_0.76__colsample_bytree_0.95__max_depth_12__gamma_1.85__lambda_1.8283.model' #best nClass W_mc model
+#classModel = 'nClassesModelMCWeights___min_child_weight_13__n_estimators_18__sub_sample_0.9030__eta_0.76__colsample_bytree_0.95__max_depth_12__gamma_1.85__lambda_1.8283.model' #best nClass W_mc model
 #classModel = 'nClassesModelEQWeights___min_child_weight_2__n_estimators_47__sub_sample_0.9614__eta_0.74__colsample_bytree_0.98__max_depth_6__gamma_0.03__lambda_1.1377.model' #best nClass W_EQ model
 #classModel = 'nClassesModelSqrtEQWeights___min_child_weight_2__n_estimators_196__sub_sample_0.8505__eta_0.75__colsample_bytree_0.90__max_depth_9__gamma_0.08__lambda_0.9049.model' #best nClass Sqrt(EQ) model
 #classModel = 'nClassesModelCbrtEQWeights___min_child_weight_2__n_estimators_245__sub_sample_0.8985__eta_0.63__colsample_bytree_0.99__max_depth_14__gamma_0.06__lambda_0.9890.model' #best nClass Cbrt(EQ) model
@@ -321,8 +328,7 @@ for params in paramSets:
 paramSets = None
 dataFrame = 'dataTotal.pkl'
 #dataFrame = None
-#sigFrame  = 'signifTotal.pkl'
-sigFrame  = 'MultiClassTotal.pkl'
+sigFrame  = 'signifTotal.pkl'
 #sigFrame  = None
 ########intLumi = 137. #NOTE: uncomment iff doing combined optimisation
 

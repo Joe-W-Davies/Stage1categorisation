@@ -96,7 +96,7 @@ class CatOptim:
     self.sortOthers    = False
     self.addNonSig     = False
     self.transform     = False
-    self.constantBkg   = False
+    self.constBkg   = False
     assert len(bkgDiscrims) == len(sigDiscrims)
     assert len(ranges)      == len(sigDiscrims)
     assert len(names)       == len(sigDiscrims)
@@ -131,11 +131,12 @@ class CatOptim:
     return arr
 
   def setConstantBkg( self, val ):
-    self.constantBkg = val
+    self.constBkg = val
 
   def optimise(self, lumi, nIters):
     '''Run the optimisation for a given number of iterations'''
     for iIter in range(nIters):
+      if(iIter % 500 == 0): print('At iteraration: %g/%g' % (iIter,nIters))
       cuts = od()
       for iName,name in enumerate(self.names):
         tempCuts = np.random.uniform(self.lows[name], self.highs[name], self.nCats)

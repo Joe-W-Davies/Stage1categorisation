@@ -34,15 +34,28 @@ trainFrac = 0.7
 validFrac = 0.1
 
 #get trees from files, put them in data frames
+#Standard training
 #procFileMap = {'ggh':'ggH.root', 'vbf':'VBF.root', 'tth':'ttH.root', 'wzh':'VH.root', 'dipho':'Dipho.root', 'gjet':'GJet.root', 'qcd':'QCD.root'}
-procFileMap = {'ggh':'powheg_ggH.root', 'vbf':'powheg_VBF.root', 'tth':'powheg_ttH.root', 
-               'dipho':'Dipho.root', 'gjet_promptfake':'GJet_pf.root', 'gjet_fakefake':'GJet_ff.root', 'qcd_promptfake':'QCD_pf.root', 'qcd_fakefake':'QCD_ff.root'}
+#Standard training but with low stat sample ommited
+#procFileMap = {'ggh':'ggH_powheg.root', 'vbf':'VBF_powheg.root',  
+#               'dipho':'Dipho_powheg.root', 'gjet':'GJet_powheg.root', 'qcd':'QCD_powheg.root'}
+#Samples for training a single combined classifier
+#procFileMap = {'ggh':'ggH_powheg_combined.root', 'vbf':'VBF_powheg_combined.root',  
+#               'dipho':'Dipho_combined.root', 'gjet':'GJet_combined.root', 'qcd':'QCD_combined.root'}
+#Samples for training a single combined classifier with years as additional binary features
+#procFileMap = {'ggh':'ggH_combined_withBinaryYearTag.root', 'vbf':'VBF_combined_withBinaryYearTag.root',  
+#               'dipho':'Dipho_combined_withBinaryYearTag.root', 'gjet':'GJet_combined_withBinaryYearTag.root', 'qcd':'QCD_combined_withBinaryYearTag.root'} 
 theProcs = procFileMap.keys()
 
 #define the different sets of variables used
-diphoVars  = ['leadmva','subleadmva','leadptom','subleadptom',
-              'leadeta','subleadeta',
+#Standard training
+diphoVars  = ['dipho_leadIDMVA','dipho_subleadIDMVA','dipho_lead_ptoM','dipho_sublead_ptoM',
+              'dipho_leadEta','dipho_subleadEta',
               'CosPhi','vtxprob','sigmarv','sigmawv']
+#training with year as additional binary feature
+#diphoVars  = ['dipho_leadIDMVA','dipho_subleadIDMVA','dipho_lead_ptoM','dipho_sublead_ptoM',
+#              'dipho_leadEta','dipho_subleadEta',
+#              'CosPhi','vtxprob','sigmarv','sigmawv','year_2016', 'year_2017', 'year_2018']
 
 #either get existing data frame or create it
 trainTotal = None
@@ -50,9 +63,29 @@ if not opts.dataFrame:
   trainFrames = {}
   #get the trees, turn them into arrays
   for proc,fn in procFileMap.iteritems():
+      print 'processing %s' %proc
       trainFile   = r.TFile('%s/%s'%(trainDir,fn))
-      if proc[-1].count('h') or 'vbf' in proc: trainTree = trainFile.Get('vbfTagDumper/trees/%s_125_13TeV_VBFDiJet'%proc)
-      else: trainTree = trainFile.Get('vbfTagDumper/trees/%s_13TeV_VBFDiJet'%proc)
+       
+      if proc[-1].count('h') or 'vbf' in proc:
+        print 'getting tree: vbfTagDumper/trees/%s_125_13TeV_GeneralDipho'%proc
+        trainTree = trainFile.Get('vbfTagDumper/trees/%s_125_13TeV_GeneralDipho'%proc)
+      elif 'dipho' in proc:
+        print 'getting tree: vbfTagDumper/trees/%s_13TeV_GeneralDipho'%proc
+        trainTree = trainFile.Get('vbfTagDumper/trees/%s_13TeV_GeneralDipho'%proc)
+      else: 
+        print 'getting tree: vbfTagDumper/trees/%s_anyfake_13TeV_GeneralDipho'%proc
+        trainTree = trainFile.Get('vbfTagDumper/trees/%s_anyfake_13TeV_GeneralDipho'%proc)
+      ''' 
+      if proc[-1].count('h') or 'vbf' in proc:
+        print 'getting tree: %s_125_13TeV_GeneralDipho'%proc
+        trainTree = trainFile.Get('%s_125_13TeV_GeneralDipho'%proc)
+      elif 'dipho' in proc:
+        print 'getting tree: /%s_13TeV_GeneralDipho'%proc
+        trainTree = trainFile.Get('%s_13TeV_GeneralDipho'%proc)
+      else: 
+        print 'getting tree: /%s_anyfake_13TeV_GeneralDipho'%proc
+        trainTree = trainFile.Get('%s_anyfake_13TeV_GeneralDipho'%proc)
+      '''
       trainTree.SetBranchStatus('nvtx',0)
       trainTree.SetBranchStatus('VBFMVAValue',0)
       trainTree.SetBranchStatus('dijet_*',0)
@@ -66,6 +99,8 @@ if not opts.dataFrame:
       trainTree.SetBranchStatus('run',0)
       trainTree.SetBranchStatus('npu',0)
       trainTree.SetBranchStatus('puweight',0)
+      trainTree.SetBranchStatus('jet1*',0)
+      trainTree.SetBranchStatus('jet2*',0)
       newFile = r.TFile('/vols/cms/es811/Stage1categorisation/trainTrees/new.root','RECREATE')
       newTree = trainTree.CloneTree()
       trainFrames[proc] = pd.DataFrame( tree2array(newTree) )
@@ -83,16 +118,16 @@ if not opts.dataFrame:
   print 'created total frame'
   
   #then filter out the events into only those with the phase space we are interested in
-  trainTotal = trainTotal[trainTotal.CMS_hgg_mass>100.]
-  trainTotal = trainTotal[trainTotal.CMS_hgg_mass<180.]
+  trainTotal = trainTotal[trainTotal.dipho_mass>100.]
+  trainTotal = trainTotal[trainTotal.dipho_mass<180.]
   print 'done mass cuts'
   
   #some extra cuts that are applied for diphoton BDT in the AN
-  trainTotal = trainTotal[trainTotal.leadmva>-0.9]
-  trainTotal = trainTotal[trainTotal.subleadmva>-0.9]
-  trainTotal = trainTotal[trainTotal.leadptom>0.333]
-  trainTotal = trainTotal[trainTotal.subleadptom>0.25]
-  trainTotal = trainTotal[trainTotal.stage1cat>-1.]
+  trainTotal = trainTotal[trainTotal.dipho_leadIDMVA>-0.9]
+  trainTotal = trainTotal[trainTotal.dipho_subleadIDMVA>-0.9]
+  trainTotal = trainTotal[trainTotal.dipho_lead_ptoM>0.333]
+  trainTotal = trainTotal[trainTotal.dipho_sublead_ptoM>0.25]
+  trainTotal = trainTotal[trainTotal.HTXSstage1_1_cat!=-100]
   print 'done basic preselection cuts'
   
   #add extra info to dataframe
@@ -103,18 +138,18 @@ if not opts.dataFrame:
   print 'all columns added'
 
   #save as a pickle file
-  if not path.isdir(frameDir): 
-    system('mkdir -p %s'%frameDir)
-  trainTotal.to_pickle('%s/trainTotal.pkl'%frameDir)
-  print 'frame saved as %s/trainTotal.pkl'%frameDir
+  #if not path.isdir(frameDir): 
+  #  system('mkdir -p %s'%frameDir)
+  #trainTotal.to_pickle('%s/trainTotal.pkl'%frameDir)
+  #print 'frame saved as %s/trainTotal.pkl'%frameDir
 
 #read in dataframe if above steps done before
 else:
   trainTotal = pd.read_pickle('%s/%s'%(frameDir,opts.dataFrame))
   print 'Successfully loaded the dataframe'
 
-sigSumW = np.sum( trainTotal[trainTotal.stage1cat>0.01]['weight'].values )
-bkgSumW = np.sum( trainTotal[trainTotal.stage1cat==0]['weight'].values )
+sigSumW = np.sum( trainTotal[trainTotal.HTXSstage1cat>0.01]['weight'].values )
+bkgSumW = np.sum( trainTotal[trainTotal.HTXSstage1cat==0]['weight'].values )
 print 'sigSumW %.6f'%sigSumW
 print 'bkgSumW %.6f'%bkgSumW
 print 'ratio %.6f'%(sigSumW/bkgSumW)
@@ -124,7 +159,7 @@ print 'ratio %.6f'%(sigSumW/bkgSumW)
 theShape = trainTotal.shape[0]
 diphoShuffle = np.random.permutation(theShape)
 diphoTrainLimit = int(theShape*trainFrac)
-diphoValidLimit = int(theShape*(trainFrac+validFrac))
+#diphoValidLimit = int(theShape*(trainFrac+validFrac))
 
 #setup the various datasets for diphoton training
 diphoX  = trainTotal[diphoVars].values
@@ -132,7 +167,7 @@ diphoY  = trainTotal['truthDipho'].values
 diphoTW = trainTotal['diphoWeight'].values
 diphoAW = trainTotal['altDiphoWeight'].values
 diphoFW = trainTotal['weight'].values
-diphoM  = trainTotal['CMS_hgg_mass'].values
+diphoM  = trainTotal['dipho_mass'].values
 del trainTotal
 
 diphoX  = diphoX[diphoShuffle]
@@ -142,12 +177,12 @@ diphoAW = diphoAW[diphoShuffle]
 diphoFW = diphoFW[diphoShuffle]
 diphoM  = diphoM[diphoShuffle]
 
-diphoTrainX,  diphoValidX,  diphoTestX  = np.split( diphoX,  [diphoTrainLimit,diphoValidLimit] )
-diphoTrainY,  diphoValidY,  diphoTestY  = np.split( diphoY,  [diphoTrainLimit,diphoValidLimit] )
-diphoTrainTW, diphoValidTW, diphoTestTW = np.split( diphoTW, [diphoTrainLimit,diphoValidLimit] )
-diphoTrainAW, diphoValidAW, diphoTestAW = np.split( diphoAW, [diphoTrainLimit,diphoValidLimit] )
-diphoTrainFW, diphoValidFW, diphoTestFW = np.split( diphoFW, [diphoTrainLimit,diphoValidLimit] )
-diphoTrainM,  diphoValidM,  diphoTestM  = np.split( diphoM,  [diphoTrainLimit,diphoValidLimit] )
+diphoTrainX,  diphoTestX  = np.split( diphoX,  [diphoTrainLimit] )
+diphoTrainY,  diphoTestY  = np.split( diphoY,  [diphoTrainLimit] )
+diphoTrainTW, diphoTestTW = np.split( diphoTW, [diphoTrainLimit] )
+diphoTrainAW, diphoTestAW = np.split( diphoAW, [diphoTrainLimit] )
+diphoTrainFW, diphoTestFW = np.split( diphoFW, [diphoTrainLimit] )
+diphoTrainM,  diphoTestM  = np.split( diphoM,  [diphoTrainLimit] )
 
 #build the background discrimination BDT
 trainingDipho = xg.DMatrix(diphoTrainX, label=diphoTrainY, weight=diphoTrainTW, feature_names=diphoVars)
@@ -201,7 +236,7 @@ print 'area under roc curve for test set     = %1.3f'%( roc_auc_score(diphoTestY
 #exit("Plotting not working for now so exit")
 #make some plots 
 plotDir = trainDir.replace('trees','plots')
-plotDir = '%s/%s'%paramExt
+plotDir = '%s/%s'%(plotDir,paramExt)
 if not path.isdir(plotDir): 
   system('mkdir -p %s'%plotDir)
 bkgEff, sigEff, nada = roc_curve(diphoTestY, diphoPredY, sample_weight=diphoTestFW)
@@ -209,15 +244,16 @@ plt.figure(1)
 plt.plot(bkgEff, sigEff)
 plt.xlabel('Background efficiency')
 plt.ylabel('Signal efficiency')
-#plt.show()
+plt.show()
 plt.savefig('%s/diphoROC.pdf'%plotDir)
 bkgEff, sigEff, nada = roc_curve(diphoTestY, altDiphoPredY, sample_weight=diphoTestFW)
 plt.figure(2)
 plt.plot(bkgEff, sigEff)
 plt.xlabel('Background efficiency')
 plt.ylabel('Signal efficiency')
-#plt.show()
+plt.show()
 plt.savefig('%s/altDiphoROC.pdf'%plotDir)
+plt.savefig('%s/altDiphoROC.png'%plotDir)
 plt.figure(3)
 xg.plot_importance(diphoModel)
 #plt.show()
@@ -229,7 +265,7 @@ plt.savefig('%s/altDiphoImportances.pdf'%plotDir)
 
 #draw sig vs background distribution
 nOutputBins = 50
-theCanv = useSty.setCanvas()
+theCanv = r.TCanvas("c1","c1",600,600)
 sigScoreW = diphoTestFW * (diphoTestY==1)
 sigScoreHist = r.TH1F('sigScoreHist', 'sigScoreHist', nOutputBins, 0., 1.)
 useSty.formatHisto(sigScoreHist)
@@ -246,12 +282,12 @@ fill_hist(bkgScoreHist, diphoPredY, weights=bkgScoreW)
 sigScoreHist.SetLineColor(r.kBlue)
 sigScoreHist.Draw('hist')
 useSty.drawCMS()
-useSty.drawEnPu(lumi='35.9 fb^{-1}')
+useSty.drawEnPu(lumi='%2.1f fb^{-1}'%opts.intLumi)
 theCanv.SaveAs('%s/sigScore.pdf'%plotDir)
 bkgScoreHist.SetLineColor(r.kRed)
 bkgScoreHist.Draw('hist')
 useSty.drawCMS()
-useSty.drawEnPu(lumi='35.9 fb^{-1}')
+useSty.drawEnPu(lumi='%2.1f fb^{-1}'%opts.intLumi)
 theCanv.SaveAs('%s/bkgScore.pdf'%plotDir)
 
 #apply transformation to flatten ggH
@@ -271,19 +307,19 @@ sigScoreHist.Draw('hist')
 bkgScoreHist.SetLineColor(r.kRed)
 bkgScoreHist.Draw('hist,same')
 useSty.drawCMS()
-useSty.drawEnPu(lumi='35.9 fb^{-1}')
+useSty.drawEnPu(lumi='%2.1f fb^{-1}'%opts.intLumi)
 theCanv.SaveAs('%s/outputScores.pdf'%plotDir)
 
 #draw sig vs background distribution
-theCanv = useSty.setCanvas()
+theCanvNew = r.TCanvas("c2","c2",600,600)
 sigScoreW = diphoTestFW * (diphoTestY==1)
-sigScoreHist = r.TH1F('sigScoreHist', 'sigScoreHist', nOutputBins, 0., 1.)
+sigScoreHist = r.TH1F('sigScoreHistAlt', 'sigScoreHistAlt', nOutputBins, 0., 1.)
 useSty.formatHisto(sigScoreHist)
 sigScoreHist.SetTitle('')
 sigScoreHist.GetXaxis().SetTitle('Diphoton BDT score')
 fill_hist(sigScoreHist, altDiphoPredY, weights=sigScoreW)
 bkgScoreW = diphoTestFW * (diphoTestY==0)
-bkgScoreHist = r.TH1F('bkgScoreHist', 'bkgScoreHist', nOutputBins, 0., 1.)
+bkgScoreHist = r.TH1F('bkgScoreHistAlt', 'bkgScoreHistAlt', nOutputBins, 0., 1.)
 useSty.formatHisto(bkgScoreHist)
 bkgScoreHist.SetTitle('')
 bkgScoreHist.GetXaxis().SetTitle('Diphoton BDT score')
@@ -292,13 +328,13 @@ fill_hist(bkgScoreHist, altDiphoPredY, weights=bkgScoreW)
 sigScoreHist.SetLineColor(r.kBlue)
 sigScoreHist.Draw('hist')
 useSty.drawCMS()
-useSty.drawEnPu(lumi='35.9 fb^{-1}')
-theCanv.SaveAs('%s/altSigScore.pdf'%plotDir)
+useSty.drawEnPu(lumi='%2.1f fb^{-1}'%opts.intLumi)
+theCanvNew.SaveAs('%s/altSigScore.pdf'%plotDir)
 bkgScoreHist.SetLineColor(r.kRed)
 bkgScoreHist.Draw('hist')
 useSty.drawCMS()
-useSty.drawEnPu(lumi='35.9 fb^{-1}')
-theCanv.SaveAs('%s/altBkgScore.pdf'%plotDir)
+useSty.drawEnPu(lumi='%2.1f fb^{-1}'%opts.intLumi)
+theCanvNew.SaveAs('%s/altBkgScore.pdf'%plotDir)
 
 for iBin in range(1,nOutputBins+1):
     sigVal = sigScoreHist.GetBinContent(iBin)

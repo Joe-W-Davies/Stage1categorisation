@@ -2,6 +2,7 @@
 from os import system, path, getcwd
 from otherHelpers import submitJob
 import numpy as np
+from collections import OrderedDict as od
 
 dryRun = False
 #dryRun = True
@@ -11,30 +12,20 @@ runLocal = True
 
 myDir = getcwd()
 baseDir = '/vols/cms/jwd18/Stage1categorisation/Pass1'
-#years = ['2016','2017']
+years = od()
+years['2016'] = 35.9
+years['2017'] = 41.5
+years['2018'] = 59.7
+years['Combined']  = 45.7
 
-#years = ['2016']
-#intLumi = 35.9
-
-#years = ['2017']
-#intLumi = 41.5
-
-#years = ['2018']
-#intLumi = 59.7
-
-years = ['Combined']
-intLumi = 45.7
-
-script    = 'diphotonCategorisation.py'
-paramSets = [None]
-#paramSets = [None,'max_depth:3','max_depth:4','max_depth:5','max_depth:10','eta:0.1','eta:0.5','lambda:0']
-models    = None
-classModel = None
-#dataFrame = 'trainTotal.pkl'
-dataFrame = None
-sigFrame  = None
-
-
+#script    = 'diphotonCategorisation.py'
+#paramSets = [None]
+##paramSets = [None,'max_depth:3','max_depth:4','max_depth:5','max_depth:10','eta:0.1','eta:0.5','lambda:0']
+#models    = None
+#classModel = None
+##dataFrame = 'trainTotal.pkl'
+#dataFrame = None
+#sigFrame  = None
 
 #script    = 'vhHadCategorisation.py'
 #paramSets = [None]
@@ -46,7 +37,7 @@ sigFrame  = None
 #sigFrame  = None
 
 #script    = 'dataSignificancesVHhad.py'
-#models    = ['vhHadModel.model']
+#models    = ['altDiphoModel.model']
 #classModel = None
 #paramSets = [None]
 #for params in paramSets:
@@ -344,6 +335,38 @@ script    = 'dataSignificancesEightCat.py'
 models    = ['altDiphoModel.model']
 #paramSets = [None,'max_depth:3','max_depth:4','max_depth:5','max_depth:10','eta:0.1','eta:0.5','lambda:0']
 paramSets = [None]
+
+#script    = 'vbfCategorisation.py'
+#paramSets = [None]
+##paramSets = [None,'max_depth:3','max_depth:4','max_depth:5','max_depth:10','eta:0.1','eta:0.5','lambda:0']
+#models    = None
+#classModel = None
+##dataFrame = 'vbfTotal.pkl'
+#dataFrame = None
+#sigFrame  = None
+
+#script    = 'dataSignificancesVBFthree.py'
+#models    = ['altDiphoModel.model']
+#classModel = None
+#paramSets = [None]
+#for params in paramSets:
+#  if not params: continue
+#  params = params.split(',')
+#  name = 'diphoModel'
+#  for param in params:
+#    var = param.split(':')[0]
+#    val = param.split(':')[1]
+#    name += '__%s_%s'%(var,str(val))
+#  name += '.model'
+#  models.append(name)
+#paramSets = None
+#dataFrame = None
+##dataFrame = 'dataTotal.pkl'
+#sigFrame  = 'vbfTotal.pkl'
+
+#script    = 'nJetCategorisation.py'
+#paramSets = [None,'max_depth:10']
+#models    = None
 #classModel = None
 classModel = 'EightClassesModelMCW___min_child_weight_11__subsample_0.976559__eta_0.78__colsample_bytree_0.89__max_depth_13__gamma_0.65__lambda_1.615699.model' #best EightClass model trained with MC weights and dipho_pt
 #classModel = 'EightClassesModelEQW___min_child_weight_2__subsample_0.942551__eta_0.57__colsample_bytree_0.80__max_depth_6__gamma_0.03__lambda_0.327904.model' #best EightClass model trained with EQW weights and dipho_pt
@@ -491,17 +514,17 @@ sigFrame  = None
 #sigFrame  = 'vbfTotal.pkl'
 
 if __name__=='__main__':
-  for year in years:
+  #for year in years:
+  for year,lumi in years.iteritems():
     jobDir = '%s/Jobs/%s/%s' % (myDir, script.replace('.py',''), year)
     if not path.isdir( jobDir ): system('mkdir -p %s'%jobDir)
     trainDir  = '%s/%s/trees'%(baseDir,year)
     theCmd = 'python %s -t %s '%(script, trainDir)
+    theCmd += '--intLumi %s '%lumi
     if dataFrame: 
       theCmd += '-d %s '%dataFrame
     if sigFrame: 
       theCmd += '-s %s '%sigFrame
-    if intLumi: 
-      theCmd += '--intLumi %s '%intLumi
     if classModel: 
       theCmd += '--className %s '%classModel
     if paramSets and models:

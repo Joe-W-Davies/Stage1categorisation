@@ -5,20 +5,22 @@ def addPt_2016(row):
     return row['CMS_hgg_mass']*row['diphoptom']
 
 def truthDipho(row):
-    if not row['HTXSstage1cat']==0: return 1
-    else: return 0
-
-def truthDipho_2016(row):
-    if not row['HTXSstage1cat']<100: return 1
+    if not row['HTXSstage1_1_cat']==0: return 1
     else: return 0
 
 def truthVhHad(row):
-    if row['tempStage1bin']==203: return 1
-    elif row['tempStage1bin']>107 and row['tempStage1bin']<111: return 0
-    else: return -1
+    if row['HTXSstage1_1_cat']==204: return 1
+    else: return 0
+    #elif row['HTXSstage1_1_cat']>107 and row['HTXSstage1_1_cat']<111: return 0
+    #else: return -1
 
 def vhHadWeight(row, ratio):
     weight = 1000. * abs(row['weight'])
+    if row['proc'].count('qcd'): 
+        weight *= 0.04 #downweight bc too few events
+    #now account for the resolution
+    if row['sigmarv']>0. and row['sigmawv']>0.:
+        weight *= ( (row['vtxprob']/row['sigmarv']) + ((1.-row['vtxprob'])/row['sigmawv']) )
     if row['truthVhHad']==1: 
       return ratio * weight
     else: return weight
@@ -69,11 +71,6 @@ def truthClass_2016(row):
   elif(row['gen_pTH']>200): return 8
   else: return -1 #everything that doesn't go into a bin
 
-def truthJets(row):
-  if (row['HTXSnjets']==0): return 0  
-  if (row['HTXSnjets']==1): return 1  
-  if (row['HTXSnjets']>=2): return 2  
-  else: return -1
 
 def reco_2016(row):
   if(row['diphopt'] < 200):
@@ -114,6 +111,31 @@ def reco_2016(row):
           #if(ev.gen_dijet_Mjj > 1500): return 19 
   elif(row['diphopt']>200): return 8
   else: return -1 #everything that doesn't go into a bin
+
+def truthVBF(row):
+    if row['HTXSstage1_1_cat']>206.5 and row['HTXSstage1_1_cat']<210.5: return 2
+    elif row['HTXSstage1_1_cat']>109.5 and row['HTXSstage1_1_cat']<113.5: return 1
+    else: return 0
+    #elif row['HTXSstage1_1_cat']==0: return 0
+    #else: return -1
+
+def vbfWeight(row, vbfSumW, gghSumW, bkgSumW):
+    weight = abs(row['weight'])
+    if row['proc'].count('qcd'): 
+        weight *= 0.04 
+    if row['sigmarv']>0. and row['sigmawv']>0.:
+        weight *= ( (row['vtxprob']/row['sigmarv']) + ((1.-row['vtxprob'])/row['sigmawv']) )
+    if row['truthVBF']==2: 
+      return (bkgSumW/vbfSumW) * weight
+    elif row['truthVBF']==1: 
+      return (bkgSumW/gghSumW) * weight
+    else: return weight
+
+def truthJets(row):
+    if row['HTXSstage1_1_cat']==3: return 0
+    elif row['HTXSstage1_1_cat']>=4 and row['HTXSstage1_1_cat']<=7: return 1
+    elif row['HTXSstage1_1_cat']>=8 and row['HTXSstage1_1_cat']<=11: return 2
+    else: return -1
 
 def reco(row):
     #Stage1.2 category definitions
@@ -197,7 +219,7 @@ def diphoWeight(row, sigWeight=1.):
     weight = row['weight']
     if row['proc'].count('qcd'): 
         weight *= 0.04 #downweight bc too few events
-    elif row['HTXSstage1cat'] > 0.01:
+    elif row['HTXSstage1_1_cat'] > 0.01:
         weight *= sigWeight #arbitrary change in signal weight, to be optimised
     #now account for the resolution
     if row['sigmarv']>0. and row['sigmawv']>0.:
@@ -234,13 +256,12 @@ def jetWeight(row):
     weight = abs(weight)
     return weight
 
-#def altDiphoWeight(row, sigWeight=1./0.001169):
-def altDiphoWeight(row, sigWeight=1./0.001297):
+def altDiphoWeight(row, weightRatio):
     weight = row['weight']
     if row['proc'].count('qcd'):
         weight *= 0.04 #downweight bc too few events
-    elif row['HTXSstage1cat'] > 0.01:
-        weight *= sigWeight #arbitrary change in signal weight, to be optimised
+    elif row['HTXSstage1_1_cat'] > 0.01:
+        weight *= weightRatio #arbitrary change in signal weight, to be optimised
     #now account for the resolution
     if row['sigmarv']>0. and row['sigmawv']>0.:
         weight *= ( (row['vtxprob']/row['sigmarv']) + ((1.-row['vtxprob'])/row['sigmawv']) )

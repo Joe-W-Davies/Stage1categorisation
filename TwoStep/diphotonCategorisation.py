@@ -1,8 +1,8 @@
 #usual imports
-import ROOT as r
 import numpy as np
 import pandas as pd
 import xgboost as xg
+import uproot as upr
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -12,7 +12,6 @@ from os import path, system
 
 from addRowFunctions import addPt, truthDipho, reco, diphoWeight, altDiphoWeight
 from otherHelpers import prettyHist, getAMS, computeBkg, getRealSigma
-from root_numpy import tree2array, fill_hist
 import usefulStyle as useSty
 
 #configure options
@@ -22,7 +21,6 @@ parser.add_option('-t','--trainDir', help='Directory for input files')
 parser.add_option('-d','--dataFrame', default=None, help='Path to dataframe if it already exists')
 parser.add_option('--intLumi',type='float', default=35.9, help='Integrated luminosity')
 parser.add_option('--trainParams',default=None, help='Comma-separated list of colon-separated pairs corresponding to parameters for the training')
-#parser.add_option('--equalWeights', default=False, action='store_true', help='Alter weights for training so that signal and background have equal sum of weights')
 (opts,args)=parser.parse_args()
 
 #setup global variables
@@ -46,6 +44,8 @@ validFrac = 0.1
 #procFileMap = {'ggh':'ggH_combined_withBinaryYearTag.root', 'vbf':'VBF_combined_withBinaryYearTag.root',  
 #               'dipho':'Dipho_combined_withBinaryYearTag.root', 'gjet':'GJet_combined_withBinaryYearTag.root', 'qcd':'QCD_combined_withBinaryYearTag.root'} 
 theProcs = procFileMap.keys()
+signals     = ['ggh','vbf']
+backgrounds = ['dipho','gjet_anyfake','qcd_anyfake']
 
 #define the different sets of variables used
 #Standard training
@@ -63,49 +63,11 @@ if not opts.dataFrame:
   trainFrames = {}
   #get the trees, turn them into arrays
   for proc,fn in procFileMap.iteritems():
-      print 'processing %s' %proc
-      trainFile   = r.TFile('%s/%s'%(trainDir,fn))
-       
-      if proc[-1].count('h') or 'vbf' in proc:
-        print 'getting tree: vbfTagDumper/trees/%s_125_13TeV_GeneralDipho'%proc
-        trainTree = trainFile.Get('vbfTagDumper/trees/%s_125_13TeV_GeneralDipho'%proc)
-      elif 'dipho' in proc:
-        print 'getting tree: vbfTagDumper/trees/%s_13TeV_GeneralDipho'%proc
-        trainTree = trainFile.Get('vbfTagDumper/trees/%s_13TeV_GeneralDipho'%proc)
-      else: 
-        print 'getting tree: vbfTagDumper/trees/%s_anyfake_13TeV_GeneralDipho'%proc
-        trainTree = trainFile.Get('vbfTagDumper/trees/%s_anyfake_13TeV_GeneralDipho'%proc)
-      ''' 
-      if proc[-1].count('h') or 'vbf' in proc:
-        print 'getting tree: %s_125_13TeV_GeneralDipho'%proc
-        trainTree = trainFile.Get('%s_125_13TeV_GeneralDipho'%proc)
-      elif 'dipho' in proc:
-        print 'getting tree: /%s_13TeV_GeneralDipho'%proc
-        trainTree = trainFile.Get('%s_13TeV_GeneralDipho'%proc)
-      else: 
-        print 'getting tree: /%s_anyfake_13TeV_GeneralDipho'%proc
-        trainTree = trainFile.Get('%s_anyfake_13TeV_GeneralDipho'%proc)
-      '''
-      trainTree.SetBranchStatus('nvtx',0)
-      trainTree.SetBranchStatus('VBFMVAValue',0)
-      trainTree.SetBranchStatus('dijet_*',0)
-      trainTree.SetBranchStatus('dZ',0)
-      trainTree.SetBranchStatus('centralObjectWeight',0)
-      trainTree.SetBranchStatus('rho',0)
-      trainTree.SetBranchStatus('nvtx',0)
-      trainTree.SetBranchStatus('event',0)
-      trainTree.SetBranchStatus('lumi',0)
-      trainTree.SetBranchStatus('processIndex',0)
-      trainTree.SetBranchStatus('run',0)
-      trainTree.SetBranchStatus('npu',0)
-      trainTree.SetBranchStatus('puweight',0)
-      trainTree.SetBranchStatus('jet1*',0)
-      trainTree.SetBranchStatus('jet2*',0)
-      newFile = r.TFile('/vols/cms/es811/Stage1categorisation/trainTrees/new.root','RECREATE')
-      newTree = trainTree.CloneTree()
-      trainFrames[proc] = pd.DataFrame( tree2array(newTree) )
-      del newTree
-      del newFile
+      trainFile = upr.open('%s/%s'%(trainDir,fn)) 
+      if proc in signals: trainTree = trainFile['vbfTagDumper/trees/%s_125_13TeV_GeneralDipho'%proc]
+      elif proc in backgrounds: trainTree = trainFile['vbfTagDumper/trees/%s_13TeV_GeneralDipho'%proc]
+      else: raise Exception('Error did not recognise process %s !'%proc)
+      trainFrames[proc] = trainTree.pandas.df(allVarsGen)
       trainFrames[proc]['proc'] = proc
   print 'got trees'
   
@@ -121,20 +83,26 @@ if not opts.dataFrame:
   trainTotal = trainTotal[trainTotal.dipho_mass>100.]
   trainTotal = trainTotal[trainTotal.dipho_mass<180.]
   print 'done mass cuts'
-  
-  #some extra cuts that are applied for diphoton BDT in the AN
   trainTotal = trainTotal[trainTotal.dipho_leadIDMVA>-0.9]
   trainTotal = trainTotal[trainTotal.dipho_subleadIDMVA>-0.9]
   trainTotal = trainTotal[trainTotal.dipho_lead_ptoM>0.333]
   trainTotal = trainTotal[trainTotal.dipho_sublead_ptoM>0.25]
   trainTotal = trainTotal[trainTotal.HTXSstage1_1_cat!=-100]
   print 'done basic preselection cuts'
-  
+
+  sigSumW = np.sum( trainTotal[trainTotal.HTXSstage1_1_cat>0.01]['weight'].values )
+  bkgSumW = np.sum( trainTotal[trainTotal.HTXSstage1_1_cat==0]['weight'].values )
+  weightRatio = bkgSumW/sigSumW
+  print 'Weight info:'
+  print 'sigSumW %.6f'%sigSumW
+  print 'bkgSumW %.6f'%bkgSumW
+  print 'S/B ratio %.6f'%(1./weightRatio)
+
   #add extra info to dataframe
   print 'about to add extra columns'
-  trainTotal['truthDipho'] = trainTotal.apply(truthDipho,axis=1)
-  trainTotal['diphoWeight'] = trainTotal.apply(diphoWeight,axis=1)
-  trainTotal['altDiphoWeight'] = trainTotal.apply(altDiphoWeight, axis=1)
+  trainTotal['truthDipho'] = trainTotal.apply(truthDipho, axis=1)
+  trainTotal['diphoWeight'] = trainTotal.apply(diphoWeight, axis=1)
+  trainTotal['altDiphoWeight'] = trainTotal.apply(altDiphoWeight, axis=1, args=[weightRatio])
   print 'all columns added'
 
   #save as a pickle file
@@ -233,7 +201,8 @@ print 'Alternative training performance:'
 print 'area under roc curve for training set = %1.3f'%( roc_auc_score(diphoTrainY, altDiphoPredYxcheck, sample_weight=diphoTrainFW) )
 print 'area under roc curve for test set     = %1.3f'%( roc_auc_score(diphoTestY, altDiphoPredY, sample_weight=diphoTestFW) )
 
-#exit("Plotting not working for now so exit")
+exit("Skip plotting for now") #FIXME maybe make configurable?
+
 #make some plots 
 plotDir = trainDir.replace('trees','plots')
 plotDir = '%s/%s'%(plotDir,paramExt)

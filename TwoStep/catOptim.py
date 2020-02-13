@@ -285,7 +285,7 @@ class CatOptim:
   
   def computeBkg( self, hist, effSigma ):
     bkgVal = 9999.
-    if hist.GetEntries() > 10 and hist.Integral()>0.000001:
+    if hist.GetEntries() > 3 and hist.Integral()>0.000001:
       if self.constBkg:
         totalBkg = hist.Integral( hist.FindBin(100.1), hist.FindBin(119.9) ) + hist.Integral( hist.FindBin(130.1), hist.FindBin(179.9) )
         bkgVal = (totalBkg/70.) * 2. * effSigma

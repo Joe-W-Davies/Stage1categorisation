@@ -1,11 +1,8 @@
 def addPt(row):
     return row['dipho_mass']*row['dipho_PToM']
 
-def addPt_2016(row):
-    return row['CMS_hgg_mass']*row['diphoptom']
-
-def truthDipho(row):
-    if not row['HTXSstage1_1_cat']==0: return 1
+def truthDipho(row, sigList): #FIXME: will need to update this when 1p2 samples arrive
+    if row['proc'] in sigList: return 1
     else: return 0
 
 def truthVhHad(row):
@@ -33,19 +30,22 @@ def truthClass(row): #translate yaceen to mine #NOTE: bins numbered 0->12
    elif row['HTXSstage1_1_cat']==111: return 11
    elif row['HTXSstage1_1_cat']==112: return 10
 
-def truthClass1p2(row): #translate yaceen to mine #NOTE: bins numbered 0->15
-   if row['HTXSstage1_1_cat']==100: return -1 #out of acceptance 
-   elif row['HTXSstage1_1_cat']>=105 and row['HTXSstage1_1_cat']<=112: return int(row['HTXSstage1_1_cat']-105)
+def truthClass1p2(row, mergeBSM=False): #translate yaceen to mine #NOTE: bins numbered 0->15
+   if row['HTXSstage1p2bin']==100: return -1 #out of acceptance 
+   elif row['HTXSstage1p2bin']>=105 and row['HTXSstage1p2bin']<=112: return int(row['HTXSstage1p2bin']-105)
    # VBF-like ggH
-   elif row['HTXSstage1_1_cat']==113: return 12
-   elif row['HTXSstage1_1_cat']==114: return 13
-   elif row['HTXSstage1_1_cat']==115: return 14
-   elif row['HTXSstage1_1_cat']==116: return 15
+   elif row['HTXSstage1p2bin']==113: return 12
+   elif row['HTXSstage1p2bin']==114: return 13
+   elif row['HTXSstage1p2bin']==115: return 14
+   elif row['HTXSstage1p2bin']==116: return 15
    #BSM bins
-   elif row['HTXSstage1_1_cat']==101: return 8 
-   elif row['HTXSstage1_1_cat']==102: return 9 
-   elif row['HTXSstage1_1_cat']==103: return 10 
-   elif row['HTXSstage1_1_cat']==104: return 11 
+   if row['HTXSstage1p2bin']>100 and row['HTXSstage1p2bin']<105:
+       if mergeBSM: return 8
+       else:
+           if row['HTXSstage1p2bin']==101: return 8 
+           elif row['HTXSstage1p2bin']==102: return 9 
+           elif row['HTXSstage1p2bin']==103: return 10 
+           elif row['HTXSstage1p2bin']==104: return 11 
 
 def truthClass_2016(row):
   if(row['gen_pTH'] < 200):
@@ -71,47 +71,6 @@ def truthClass_2016(row):
   elif(row['gen_pTH']>200): return 8
   else: return -1 #everything that doesn't go into a bin
 
-
-def reco_2016(row):
-  if(row['diphopt'] < 200):
-    if(row['n_rec_jets'] == 0):
-      if(row['diphopt'] < 10): return 0
-      else: return 1
-    if(row['n_rec_jets'] == 1): 
-      if(row['diphopt'] < 60): return 2
-      elif(row['diphopt'] < 120): return 3
-      elif(row['diphopt'] < 200): return 4 
-    if(row['n_rec_jets'] >= 2): 
-      if(row['dijet_Mjj'] < 350):
-        if(row['diphopt'] < 60): return 5 
-          #if(ev.gen_ptHjj > 0 and ev.gen_ptHjj < 25): return 6
-          #if(ev.gen_ptHjj > 25): return 7
-        elif(row['diphopt'] < 120): return 6
-          #if(ev.gen_ptHjj > 0 and ev.gen_ptHjj < 25): return 8
-          #if(ev.gen_ptHjj > 25): return 9
-        elif(row['diphopt'] < 200): return 7
-          #if(ev.gen_ptHjj > 0 and ev.gen_ptHjj < 25): return 10
-          #if(ev.gen_ptHjj > 25): return 11
-      else: #( implicit if Mjj>350)
-        if(row['ptHjj'] < 25):
-          if(row['dijet_Mjj'] < 700): return 9
-          else: return 10
-        else: #(implicit if PtHjj > 25)
-          if(row['dijet_Mjj'] < 700): return 11
-          else: return 12
-        #if(ev.gen_ptHjj > 0 and ev.gen_ptHjj < 25):
-          #if(ev.gen_dijet_Mjj < 700): return 12
-          #if(ev.gen_dijet_Mjj > 700 and ev.gen_dijet_Mjj < 1000): return 13
-          #if(ev.gen_dijet_Mjj > 1000 and ev.gen_dijet_Mjj < 1500): return 14
-          #if(ev.gen_dijet_Mjj > 1500): return 15
-        #if(ev.gen_ptHjj > 25):
-          #if(ev.gen_dijet_Mjj < 700): return 16
-          #if(ev.gen_dijet_Mjj > 700 and ev.gen_dijet_Mjj < 1000): return 17
-          #if(ev.gen_dijet_Mjj > 1000 and ev.gen_dijet_Mjj < 1500): return 18
-          #if(ev.gen_dijet_Mjj > 1500): return 19 
-  elif(row['diphopt']>200): return 8
-  else: return -1 #everything that doesn't go into a bin
-
 def truthVBF(row):
     if row['HTXSstage1_1_cat']>206.5 and row['HTXSstage1_1_cat']<210.5: return 2
     elif row['HTXSstage1_1_cat']>109.5 and row['HTXSstage1_1_cat']<113.5: return 1
@@ -131,6 +90,31 @@ def vbfWeight(row, vbfSumW, gghSumW, bkgSumW):
       return (bkgSumW/gghSumW) * weight
     else: return weight
 
+
+def applyLumiScale(row, yearToLumi):
+    weight = abs(row['weight'])
+    for year,lumi in yearToLumi.iteritems():
+        if row['year_2016']==1:
+            return weight*yearToLumi['2016']
+            break
+        elif row['year_2017']==1:
+            return weight*yearToLumi['2017']
+            break
+        elif row['year_2018']==1:
+            return weight*yearToLumi['2017']
+            
+      
+def ptSplits(row):
+    if row['diphoR']==8: 
+      if (row['diphoP']>200): 
+          if (row['diphoP']<300): return 8
+          elif (row['diphoP']<450): return 9
+          elif (row['diphoP']<650): return 10
+          else: return 11
+      else: return row['diphoR']
+    else: return row['diphoR']
+    
+
 def truthJets(row):
     if row['HTXSstage1_1_cat']==3: return 0
     elif row['HTXSstage1_1_cat']>=4 and row['HTXSstage1_1_cat']<=7: return 1
@@ -139,19 +123,19 @@ def truthJets(row):
 
 def reco(row):
     #Stage1.2 category definitions
-  if(row['dipho_pt'] < 200):
+  if(row['diphopt'] < 200):
     if(row['n_jet_30'] == 0):
-      if(row['dipho_pt'] < 10): return 0
+      if(row['diphopt'] < 10): return 0
       else: return 1
     if(row['n_jet_30'] == 1): 
-      if(row['dipho_pt'] < 60): return 2
-      elif(row['dipho_pt'] < 120): return 3
-      elif(row['dipho_pt'] < 200): return 4 
+      if(row['diphopt'] < 60): return 2
+      elif(row['diphopt'] < 120): return 3
+      elif(row['diphopt'] < 200): return 4 
     if(row['n_jet_30'] >= 2): 
       if(row['dijet_Mjj'] < 350):
-        if(row['dipho_pt'] < 60): return 5 
-        elif(row['dipho_pt'] < 120): return 6
-        elif(row['dipho_pt'] < 200): return 7
+        if(row['diphopt'] < 60): return 5 
+        elif(row['diphopt'] < 120): return 6
+        elif(row['diphopt'] < 200): return 7
       else: #( implicit if Mjj>350)
         if(row['dijet_Mjj'] < 700):
           if(row['dipho_dijet_ptHjj'] < 25): return 12
@@ -159,10 +143,10 @@ def reco(row):
         else:
           if(row['dipho_dijet_ptHjj'] < 25): return 14
           else: return 15
-  elif(row['dipho_pt']>200): 
-    if (row['dipho_pt']<300): return 8
-    elif (row['dipho_pt']<450): return 9
-    elif (row['dipho_pt']<650): return 10
+  elif(row['diphopt']>200): 
+    if (row['diphopt']<300): return 8
+    elif (row['diphopt']<450): return 9
+    elif (row['diphopt']<650): return 10
     else: return 11
 
   else: return -1 #everything that doesn't go into a bin
@@ -215,11 +199,11 @@ def jetPtToggHClass(row):
   elif(row['diphopt']>200): return 8
   else: return -1 #everything that doesn't go into a bin 
 
-def diphoWeight(row, sigWeight=1.):
+def diphoWeight(row, sigList, sigWeight=1. ):
     weight = row['weight']
     if row['proc'].count('qcd'): 
         weight *= 0.04 #downweight bc too few events
-    elif row['HTXSstage1_1_cat'] > 0.01:
+    elif row['proc'] in sigList:
         weight *= sigWeight #arbitrary change in signal weight, to be optimised
     #now account for the resolution
     if row['sigmarv']>0. and row['sigmawv']>0.:
@@ -256,11 +240,11 @@ def jetWeight(row):
     weight = abs(weight)
     return weight
 
-def altDiphoWeight(row, weightRatio):
+def altDiphoWeight(row, weightRatio,sigList):
     weight = row['weight']
     if row['proc'].count('qcd'):
         weight *= 0.04 #downweight bc too few events
-    elif row['HTXSstage1_1_cat'] > 0.01:
+    elif row['proc'] in sigList:
         weight *= weightRatio #arbitrary change in signal weight, to be optimised
     #now account for the resolution
     if row['sigmarv']>0. and row['sigmawv']>0.:

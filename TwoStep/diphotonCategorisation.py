@@ -10,6 +10,7 @@ import pickle
 from sklearn.metrics import roc_auc_score, roc_curve
 from os import path, system
 
+from variableDefinitions import diphoVars, allVarsGen, allVarsData
 from addRowFunctions import addPt, truthDipho, reco, diphoWeight, altDiphoWeight
 from otherHelpers import prettyHist, getAMS, computeBkg, getRealSigma
 import usefulStyle as useSty
@@ -33,25 +34,24 @@ validFrac = 0.1
 
 #get trees from files, put them in data frames
 #Standard training
-#procFileMap = {'ggh':'ggH.root', 'vbf':'VBF.root', 'tth':'ttH.root', 'wzh':'VH.root', 'dipho':'Dipho.root', 'gjet':'GJet.root', 'qcd':'QCD.root'}
-#Standard training but with low stat sample ommited
+#procFileMap = {'ggh':'ggH_1p2_powheg.root', 'vbf':'VBF_1p2_powheg.root', 'tth':'ttH_1p2_powheg.root', 'vh':'VH_1p2_powheg.root' ,'dipho':'Dipho_powheg.root', 'gjet_anyfake':'GJet_powheg.root', 'qcd_anyfake':'QCD_powheg.root'}
+#Standard training but with low stat samples ommited
 #procFileMap = {'ggh':'ggH_powheg.root', 'vbf':'VBF_powheg.root',  
-#               'dipho':'Dipho_powheg.root', 'gjet':'GJet_powheg.root', 'qcd':'QCD_powheg.root'}
-#Samples for training a single combined classifier
+#               'dipho':'Dipho_powheg.root', 'gjet_anyfake':'GJet_powheg.root', 'qcd_anyfake':'QCD_powheg.root'}
+#Samples for training a single combined classifier (new samples)
+#procFileMap = {'ggh':'powheg_ggH.root', 'vbf':'powheg_VBF.root',  
+               #'dipho':'Dipho.root', 'gjet_anyfake':'GJet.root', 'qcd_anyfake':'QCD.root'}
+#Samples for training a older single combined classifier
 #procFileMap = {'ggh':'ggH_powheg_combined.root', 'vbf':'VBF_powheg_combined.root',  
-#               'dipho':'Dipho_combined.root', 'gjet':'GJet_combined.root', 'qcd':'QCD_combined.root'}
+#               'dipho':'Dipho_combined.root', 'gjet_anyfake':'GJet_combined.root', 'qcd_anyfake':'QCD_combined.root'}
 #Samples for training a single combined classifier with years as additional binary features
 #procFileMap = {'ggh':'ggH_combined_withBinaryYearTag.root', 'vbf':'VBF_combined_withBinaryYearTag.root',  
 #               'dipho':'Dipho_combined_withBinaryYearTag.root', 'gjet':'GJet_combined_withBinaryYearTag.root', 'qcd':'QCD_combined_withBinaryYearTag.root'} 
 theProcs = procFileMap.keys()
-signals     = ['ggh','vbf']
+signals     = ['ggh','vbf','vh','tth']
 backgrounds = ['dipho','gjet_anyfake','qcd_anyfake']
 
-#define the different sets of variables used
-#Standard training
-diphoVars  = ['dipho_leadIDMVA','dipho_subleadIDMVA','dipho_lead_ptoM','dipho_sublead_ptoM',
-              'dipho_leadEta','dipho_subleadEta',
-              'CosPhi','vtxprob','sigmarv','sigmawv']
+
 #training with year as additional binary feature
 #diphoVars  = ['dipho_leadIDMVA','dipho_subleadIDMVA','dipho_lead_ptoM','dipho_sublead_ptoM',
 #              'dipho_leadEta','dipho_subleadEta',
@@ -63,11 +63,15 @@ if not opts.dataFrame:
   trainFrames = {}
   #get the trees, turn them into arrays
   for proc,fn in procFileMap.iteritems():
+      print 'reading proc: %s' % proc
       trainFile = upr.open('%s/%s'%(trainDir,fn)) 
-      if proc in signals: trainTree = trainFile['vbfTagDumper/trees/%s_125_13TeV_GeneralDipho'%proc]
-      elif proc in backgrounds: trainTree = trainFile['vbfTagDumper/trees/%s_13TeV_GeneralDipho'%proc]
+      if proc in signals:
+        trainTree = trainFile['vbfTagDumper/trees/%s_125_13TeV_GeneralDipho'%proc]
+        trainFrames[proc] = trainTree.pandas.df(allVarsGen) #quick fix for bkgs not having STXS 1.2 info
+      elif proc in backgrounds:
+         trainTree = trainFile['vbfTagDumper/trees/%s_13TeV_GeneralDipho'%proc]
+         trainFrames[proc] = trainTree.pandas.df(allVarsData) #quick fix for bkgs not having STXS 1.2 info
       else: raise Exception('Error did not recognise process %s !'%proc)
-      trainFrames[proc] = trainTree.pandas.df(allVarsGen)
       trainFrames[proc]['proc'] = proc
   print 'got trees'
   
@@ -87,11 +91,19 @@ if not opts.dataFrame:
   trainTotal = trainTotal[trainTotal.dipho_subleadIDMVA>-0.9]
   trainTotal = trainTotal[trainTotal.dipho_lead_ptoM>0.333]
   trainTotal = trainTotal[trainTotal.dipho_sublead_ptoM>0.25]
-  trainTotal = trainTotal[trainTotal.HTXSstage1_1_cat!=-100]
+  #trainTotal = trainTotal[trainTotal.HTXSstage1p2bin!=-100]
   print 'done basic preselection cuts'
 
-  sigSumW = np.sum( trainTotal[trainTotal.HTXSstage1_1_cat>0.01]['weight'].values )
-  bkgSumW = np.sum( trainTotal[trainTotal.HTXSstage1_1_cat==0]['weight'].values )
+  sigSumW = np.sum( trainTotal[trainTotal.HTXSstage1p1bin>0.01]['weight'].values )
+  bkgSumW = np.sum( trainTotal[trainTotal.HTXSstage1p1bin==0]['weight'].values )
+  sigSumW = 0
+  bkgSumW = 0
+  print(trainTotal.columns)
+  for proc in theProcs:
+      if proc in signals:
+          sigSumW += np.sum( trainTotal[trainTotal.proc=='%s'%proc]['weight'].values )
+      else:
+          bkgSumW += np.sum( trainTotal[trainTotal.proc=='%s'%proc]['weight'].values )
   weightRatio = bkgSumW/sigSumW
   print 'Weight info:'
   print 'sigSumW %.6f'%sigSumW
@@ -100,15 +112,15 @@ if not opts.dataFrame:
 
   #add extra info to dataframe
   print 'about to add extra columns'
-  trainTotal['truthDipho'] = trainTotal.apply(truthDipho, axis=1)
-  trainTotal['diphoWeight'] = trainTotal.apply(diphoWeight, axis=1)
-  trainTotal['altDiphoWeight'] = trainTotal.apply(altDiphoWeight, axis=1, args=[weightRatio])
+  trainTotal['truthDipho'] = trainTotal.apply(truthDipho, axis=1, args=[signals])
+  trainTotal['diphoWeight'] = trainTotal.apply(diphoWeight, axis=1, args=[signals])
+  trainTotal['altDiphoWeight'] = trainTotal.apply(altDiphoWeight, axis=1, args=[weightRatio,signals])
   print 'all columns added'
 
   #save as a pickle file
   #if not path.isdir(frameDir): 
   #  system('mkdir -p %s'%frameDir)
-  #trainTotal.to_pickle('%s/trainTotal.pkl'%frameDir)
+  #trainTotal.to_hdf('%s/signifTotal.h5'%frameDir, mode='w')
   #print 'frame saved as %s/trainTotal.pkl'%frameDir
 
 #read in dataframe if above steps done before
@@ -116,12 +128,7 @@ else:
   trainTotal = pd.read_pickle('%s/%s'%(frameDir,opts.dataFrame))
   print 'Successfully loaded the dataframe'
 
-sigSumW = np.sum( trainTotal[trainTotal.HTXSstage1cat>0.01]['weight'].values )
-bkgSumW = np.sum( trainTotal[trainTotal.HTXSstage1cat==0]['weight'].values )
-print 'sigSumW %.6f'%sigSumW
-print 'bkgSumW %.6f'%bkgSumW
-print 'ratio %.6f'%(sigSumW/bkgSumW)
-#exit('first just count the weights')
+print(trainTotal.head(20))
 
 #define the indices shuffle (useful to keep this separate so it can be re-used)
 theShape = trainTotal.shape[0]
@@ -136,7 +143,7 @@ diphoTW = trainTotal['diphoWeight'].values
 diphoAW = trainTotal['altDiphoWeight'].values
 diphoFW = trainTotal['weight'].values
 diphoM  = trainTotal['dipho_mass'].values
-del trainTotal
+#del trainTotal
 
 diphoX  = diphoX[diphoShuffle]
 diphoY  = diphoY[diphoShuffle]
@@ -175,8 +182,8 @@ print 'done'
 modelDir = trainDir.replace('trees','models')
 if not path.isdir(modelDir):
   system('mkdir -p %s'%modelDir)
-diphoModel.save_model('%s/diphoModel%s.model'%(modelDir,paramExt))
-print 'saved as %s/diphoModel%s.model'%(modelDir,paramExt)
+diphoModel.save_model('%s/diphoModel%s_NewModel.model'%(modelDir,paramExt))
+print 'saved as %s/diphoModel%s_NewModel.model'%(modelDir,paramExt)
 
 #build same thing but with equalised weights
 altTrainingDipho = xg.DMatrix(diphoTrainX, label=diphoTrainY, weight=diphoTrainAW, feature_names=diphoVars)
@@ -185,8 +192,8 @@ altDiphoModel = xg.train(trainParams, altTrainingDipho)
 print 'done'
 
 #save it
-altDiphoModel.save_model('%s/altDiphoModel%s.model'%(modelDir,paramExt))
-print 'saved as %s/altDiphoModel%s.model'%(modelDir,paramExt)
+altDiphoModel.save_model('%s/altDiphoModel%s_NewModel.model'%(modelDir,paramExt))
+print 'saved as %s/altDiphoModel%s_NewModel.model'%(modelDir,paramExt)
 
 #check performance of each training
 diphoPredYxcheck = diphoModel.predict(trainingDipho)

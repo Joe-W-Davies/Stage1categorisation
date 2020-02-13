@@ -13,19 +13,22 @@ runLocal = True
 myDir = getcwd()
 baseDir = '/vols/cms/jwd18/Stage1categorisation/Pass1'
 years = od()
-years['2016'] = 35.9
-years['2017'] = 41.5
-years['2018'] = 59.7
+#years['2016'] = 35.9
+#years['2017'] = 41.5
+#years['2018'] = 59.7
 years['Combined']  = 45.7
 
-#script    = 'diphotonCategorisation.py'
-#paramSets = [None]
-##paramSets = [None,'max_depth:3','max_depth:4','max_depth:5','max_depth:10','eta:0.1','eta:0.5','lambda:0']
-#models    = None
-#classModel = None
-##dataFrame = 'trainTotal.pkl'
-#dataFrame = None
-#sigFrame  = None
+
+'''
+script    = 'diphotonCategorisation.py'
+paramSets = [None]
+#paramSets = [None,'max_depth:3','max_depth:4','max_depth:5','max_depth:10','eta:0.1','eta:0.5','lambda:0']
+models    = None
+classModel = None
+#dataFrame = 'trainTotal.pkl'
+dataFrame = None
+sigFrame  = None
+'''
 
 #script    = 'vhHadCategorisation.py'
 #paramSets = [None]
@@ -143,7 +146,7 @@ paramSets = [None]
 #paramSets = ['min_child_weight:2,subsample:0.964181,eta:0.72,colsample_bytree:0.86,max_depth:9,gamma:0.07,lambda:1.002382'] # EQW, dipho pt
 models    = None
 classModel = None
-#dataFrame = 'jetTotal.pkl'
+#dataFrame ='MultiClassTotal.pkl'
 dataFrame = None
 sigFrame = None
 '''
@@ -299,12 +302,14 @@ dataFrame = None
 sigFrame  = None
 '''
 
-'''
+
 script    = 'dataSignificances.py'
-models    = ['altDiphoModel.model']
+#models    = ['altDiphoModelCombined.model']
+models    = ['altDiphoModel_NewModel.model']
 #paramSets = [None,'max_depth:3','max_depth:4','max_depth:5','max_depth:10','eta:0.1','eta:0.5','lambda:0']
 paramSets = [None]
 classModel = None
+#classModel = 'nClassesModelMCW_Combined_.model' #combined
 #classModel = 'nClassesModelMCW___min_child_weight_6__subsample_0.845330__eta_0.68__colsample_bytree_0.99__max_depth_13__gamma_0.41__lambda_1.458330.model'#best nClass model trained with MC weights
 #classModel = 'nJetModel_MCW___min_child_weight_10__subsample_0.949832__eta_0.76__colsample_bytree_0.95__max_depth_12__gamma_0.51__lambda_0.777625.model' #best nJet model trained with MC weights
 #classModel = 'nClassesModelEQW___min_child_weight_2__subsample_0.96__eta_0.68__colsample_bytree_0.86__max_depth_9__gamma_0.02__lambda_0.494380.model' #best nlass model trained with EQ weights (doesnt exist rn)
@@ -324,11 +329,11 @@ for params in paramSets:
   models.append(name)
   models.append(name.replace('dipho','altDipho'))
 paramSets = None
-#dataFrame = 'dataTotal.pkl'
-dataFrame = None
-#sigFrame  = 'signifTotal.pkl'
-sigFrame  = None
-'''
+dataFrame = 'dataTotal.h5'
+#dataFrame = None
+sigFrame  = 'signifTotal.h5'
+#sigFrame  = None
+
 
 '''
 script    = 'dataSignificancesEightCat.py'
@@ -518,7 +523,7 @@ if __name__=='__main__':
   for year,lumi in years.iteritems():
     jobDir = '%s/Jobs/%s/%s' % (myDir, script.replace('.py',''), year)
     if not path.isdir( jobDir ): system('mkdir -p %s'%jobDir)
-    trainDir  = '%s/%s/trees'%(baseDir,year)
+    trainDir  = '%s/%s/trees/'%(baseDir,year)
     theCmd = 'python %s -t %s '%(script, trainDir)
     theCmd += '--intLumi %s '%lumi
     if dataFrame: 

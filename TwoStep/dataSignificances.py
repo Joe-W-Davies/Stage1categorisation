@@ -4,18 +4,21 @@ import numpy as np
 import pandas as pd
 import xgboost as xg
 import matplotlib
+import uproot as upr
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import pickle
 from sklearn.metrics import roc_auc_score, roc_curve, accuracy_score
 from os import path, system
 from array import array
-from addRowFunctions import addPt, truthDipho, reco, diphoWeight, altDiphoWeight, truthClass1p2, jetPtToggHClass
+from addRowFunctions import addPt, truthDipho, reco, diphoWeight, altDiphoWeight, truthClass1p2, jetPtToggHClass, truthClass, applyLumiScale, ptSplits
 from otherHelpers import prettyHist, getAMS, computeBkg, getRealSigma, jetPtToClass 
 from root_numpy import tree2array, fill_hist
 from catOptim import CatOptim
 from math import pi
 import usefulStyle as useSty
+
+from variableDefinitions import allVarsGen
 
 #configure options
 from optparse import OptionParser
@@ -38,29 +41,33 @@ plotDir  = trainDir.replace('trees','plots')
 if not path.isdir(plotDir): 
   system('mkdir -p %s'%plotDir)
 nJetClasses = 3
-nClasses = 12
+nClasses = 9
 catNames = ['0J low','0J high', '1J low', '1J med', '1J high', '2J low', '2J med', '2J high','200<BSM<300', '300<BSM<450','450<BSM<650', '650<BSM']
 binNames = ['0J low','0J high', '1J low', '1J med', '1J high', '2J low', '2J med', '2J high', '200<BSM<300', '300<BSM<450','450<BSM<650','650<BSM','VBF-like']
 jetPriors = [0.606560, 0.270464, 0.122976]
 procPriors = [0.146457, 0.517408, 0.151512, 0.081834, 0.014406, 0.020672, 0.036236, 0.017924, 0.013551]
 
+yearToLumi = {'2016':35.9, '2017':41.5, '2018':59.7}
+
 #put root in batch mode
 r.gROOT.SetBatch(True)
 
-#get trees from files, put them in data frames
-#procFileMap = {'Data':'Data_jetInfo.root'}
-#procFileMap = {'Data':'Data_combined.root'} # all years combined
-procFileMap = {'Data':'Data.root'} 
-theProcs = procFileMap.keys()
+signals = ['ggh']
+backgrounds = ['Data']
 
 #define the different sets of variables used
 diphoVars  = ['dipho_leadIDMVA','dipho_subleadIDMVA','dipho_lead_ptoM','dipho_sublead_ptoM',
                'dipho_leadEta','dipho_subleadEta',
                'CosPhi','vtxprob','sigmarv','sigmawv']
 
+varsForCuts = ['dipho_leadIDMVA', 'dipho_mass', 'dipho_subleadIDMVA','dipho_lead_ptoM','dipho_sublead_ptoM',
+               'dipho_leadEta','dipho_subleadEta', 'dijet_Mjj', 'dipho_PToM', 'dipho_pt',
+               'CosPhi','vtxprob','sigmarv','sigmawv', 'weight', 'n_jet_30', 'dipho_dijet_ptHjj', 'HTXSstage1p2bin']
+years       = ['year_2016', 'year_2017', 'year_2018']
+
 jetVars    = ['n_jet_30','dijet_Mjj',
               'dijet_leadEta','dijet_subleadEta','dijet_subsubleadEta',
-              'dijet_LeadJPt','dijet_SubJPt','dijet_SubsubJPt',
+              'dijet_LeadJPt','dijet_SubleadJPt','dijet_SubsubleadJPt',
               'dijet_leadPUMVA','dijet_subleadPUMVA','dijet_subsubleadPUMVA',
               'dijet_leadDeltaPhi','dijet_subleadDeltaPhi','dijet_subsubleadDeltaPhi',
               'dijet_leadDeltaEta','dijet_subleadDeltaEta','dijet_subsubleadDeltaEta']
@@ -68,13 +75,20 @@ jetVars    = ['n_jet_30','dijet_Mjj',
  
 allVars   = ['n_jet_30','dijet_Mjj',
               'dijet_leadEta','dijet_subleadEta','dijet_subsubleadEta',
-              'dijet_LeadJPt','dijet_SubJPt','dijet_SubsubJPt',
+              'dijet_LeadJPt','dijet_SubleadJPt','dijet_SubsubleadJPt',
               'dijet_leadPUMVA','dijet_subleadPUMVA','dijet_subsubleadPUMVA',
               'dijet_leadDeltaPhi','dijet_subleadDeltaPhi','dijet_subsubleadDeltaPhi',
               'dijet_leadDeltaEta','dijet_subleadDeltaEta','dijet_subsubleadDeltaEta',
               'dipho_leadIDMVA','dipho_subleadIDMVA','dipho_lead_ptoM','dipho_sublead_ptoM',
               'dipho_leadEta','dipho_subleadEta',
-              'CosPhi','vtxprob','sigmarv','sigmawv','diphopt']
+              'CosPhi','vtxprob','sigmarv','sigmawv','dipho_mass', 'weight', 'dipho_PToM', 'dipho_dijet_ptHjj',                'HTXSstage1p2bin']
+
+queryString = '(dipho_mass>100.) and (dipho_mass<180.) and (dipho_leadIDMVA>-0.9) and (dipho_subleadIDMVA>-0.9) and (dipho_lead_ptoM>0.333) and (dipho_sublead_ptoM>0.25) and (dijet_Mjj<350.)'
+
+#m,procFileMap = {'Data':'Data_jetInfo.root'} 
+procFileMap = {'Data':'Data_2016.root','Data':'Data_2017.root','Data':'Data_2018.root'}
+#procFileMap = {'Data':'Data_combined.root'} 
+theProcs = procFileMap.keys()
 
 #either get existing data frame or create it
 trainTotal = None
@@ -82,25 +96,11 @@ if not opts.dataFrame:
   trainFrames = {}
   #get the trees, turn them into arrays
   for proc,fn in procFileMap.iteritems():
-      trainFile   = r.TFile('%s/%s'%(trainDir,fn))
-      if proc[-1].count('h') or 'vbf' in proc: trainTree = trainFile.Get('vbfTagDumper/trees/%s_125_13TeV_VBFDiJet'%proc)
-      else: trainTree = trainFile.Get('vbfTagDumper/trees/%s_13TeV_GeneralDipho'%proc)
-      trainTree.SetBranchStatus('nvtx',0)
-      trainTree.SetBranchStatus('VBFMVAValue',0)
-      trainTree.SetBranchStatus('dZ',0)
-      trainTree.SetBranchStatus('centralObjectWeight',0)
-      trainTree.SetBranchStatus('rho',0)
-      trainTree.SetBranchStatus('event',0)
-      trainTree.SetBranchStatus('lumi',0)
-      trainTree.SetBranchStatus('processIndex',0)
-      trainTree.SetBranchStatus('run',0)
-      trainTree.SetBranchStatus('npu',0)
-      trainTree.SetBranchStatus('puweight',0)
-      newFile = r.TFile('/vols/cms/es811/Stage1categorisation/trainTrees/new.root','RECREATE')
-      newTree = trainTree.CloneTree()
-      trainFrames[proc] = pd.DataFrame( tree2array(newTree) )
-      del newTree
-      del newFile
+      trainFile = upr.open('%s/%s'%(trainDir,fn)) 
+      if proc in signals: trainTree = trainFile['vbfTagDumper/trees/%s_125_13TeV_GeneralDipho'%proc]
+      elif proc in backgrounds: trainTree = trainFile['vbfTagDumper/trees/%s_13TeV_GeneralDipho'%proc]
+      else: raise Exception('Error did not recognise process %s !'%proc)
+      trainFrames[proc] = trainTree.pandas.df(varsForCuts[:-1]+jetVars).query(queryString)
       trainFrames[proc]['proc'] = proc
   print 'got trees'
   
@@ -112,29 +112,17 @@ if not opts.dataFrame:
   del trainFrames
   print 'created total frame'
 
+
   cutFlow2017 = open('/vols/build/cms/jwd18/NewTwoStep/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/debug/cutflow/cutFlow2017_data.txt','w+')
   cutFlow2017.write('Start with this many signal events: ')
   totEvents = np.sum(dataTotal['weight'].values)
   cutFlow2017.write('%.3f \n' % totEvents) 
-
-  #then filter out the events into only those with the phase space we are interested in
-  dataTotal = dataTotal[dataTotal.dipho_mass>100.]
-  dataTotal = dataTotal[dataTotal.dipho_mass<180.]
-  print 'done mass cuts'
 
   cutFlow2017.write('Following mass cuts, we have: ')
   afterMassCut = np.sum(dataTotal['weight'].values)
   cutFlow2017.write('%.3f \n' % afterMassCut)
   effRemovedByCut = (totEvents - afterMassCut)/totEvents
   cutFlow2017.write('So cut removed: %.3f of total events \n' %(effRemovedByCut)) 
-  
-  #some extra cuts that are applied for diphoton BDT in the AN
-  dataTotal = dataTotal[dataTotal.dipho_leadIDMVA>-0.9]
-  dataTotal = dataTotal[dataTotal.dipho_subleadIDMVA>-0.9]
-  dataTotal = dataTotal[dataTotal.dipho_lead_ptoM>0.333]
-  dataTotal = dataTotal[dataTotal.dipho_sublead_ptoM>0.25]
-  dataTotal = dataTotal[dataTotal.dijet_Mjj<350]
-  print 'done basic preselection cuts'
 
   cutFlow2017.write('Following preselection cuts, we finally have: ')
   afterPreselCut = np.sum(dataTotal['weight'].values)
@@ -149,48 +137,32 @@ if not opts.dataFrame:
   dataTotal['reco'] = dataTotal.apply(reco, axis=1)
   print 'all columns added'
 
-
   #save as a pickle file
-  #if not path.isdir(frameDir): 
-  #  system('mkdir -p %s'%frameDir)
-  #dataTotal.to_pickle('%s/dataTotal.pkl'%frameDir)
-  #print 'frame saved as %s/dataTotal.pkl'%frameDir
+  if not path.isdir(frameDir): 
+    system('mkdir -p %s'%frameDir)
+  dataTotal.to_hdf('%s/dataTotal.h5'%frameDir, key='df', mode='w', format='table')
+  print 'frame saved as %s/dataTotal.h5'%frameDir
 
 #read in dataframe if above steps done before
 else:
-  dataTotal = pd.read_pickle('%s/%s'%(frameDir,opts.dataFrame))
+  dataTotal = pd.read_hdf('%s/%s'%(frameDir,opts.dataFrame), 'df')
   print 'Successfully loaded the dataframe'
 
+print('dataTotal:')
+print(dataTotal['weight'].head(30))
 
 if not opts.signifFrame:
   #sigFileMap = {'ggh':'ggH_amc_jetinfo.root'}
-  #sigFileMap = {'ggh':'ggH_amc_combined.root'} #for all years combined
-  sigFileMap = {'ggh':'ggH_amc.root'} #for all years combined
+  sigFileMap = {'ggh':'ggh_amc_withBinaryYear_2016.root', 'ggh':'ggh_amc_withBinaryYear_2017.root', 'ggh':'ggh_amc_withBinaryYear_2018.root'} 
+  #sigFileMap = {'ggh':'ggH_amc_combined.root'} 
   trainFrames = {}
   #get the trees, turn them into arrays
   for proc,fn in sigFileMap.iteritems():
-      trainFile   = r.TFile('%s/%s'%(trainDir,fn))
-      if proc[-1].count('h') or 'vbf' in proc: trainTree = trainFile.Get('vbfTagDumper/trees/%s_125_13TeV_GeneralDipho'%proc)
-      else: trainTree = trainFile.Get('vbfTagDumper/trees/%s_13TeV_VBFDiJet'%proc)
-      trainTree.SetBranchStatus('nvtx',0)
-      trainTree.SetBranchStatus('VBFMVAValue',0)
-      trainTree.SetBranchStatus('jet*',0)
-      trainTree.SetBranchStatus('dijet_Mjj',1)
-      trainTree.SetBranchStatus('dZ',0)
-      trainTree.SetBranchStatus('centralObjectWeight',0)
-      trainTree.SetBranchStatus('rho',0)
-      trainTree.SetBranchStatus('nvtx',0)
-      trainTree.SetBranchStatus('event',0)
-      trainTree.SetBranchStatus('lumi',0)
-      trainTree.SetBranchStatus('processIndex',0)
-      trainTree.SetBranchStatus('run',0)
-      trainTree.SetBranchStatus('npu',0)
-      trainTree.SetBranchStatus('puweight',0)
-      newFile = r.TFile('/vols/cms/es811/Stage1categorisation/trainTrees/new.root','RECREATE')
-      newTree = trainTree.CloneTree()
-      trainFrames[proc] = pd.DataFrame( tree2array(newTree) )
-      del newTree
-      del newFile
+      trainFile = upr.open('%s/%s'%(trainDir,fn)) 
+      #if proc in signals: trainTree = trainFile['%s_125_13TeV_GeneralDipho'%proc]
+      if proc in signals: trainTree = trainFile['vbfTagDumper/trees/%s_125_13TeV_GeneralDipho'%proc]
+      else: raise Exception('Error did not recognise process %s !'%proc)
+      trainFrames[proc] = trainTree.pandas.df(allVars+years).query(queryString)
       trainFrames[proc]['proc'] = proc
   print 'got trees'
   
@@ -209,9 +181,6 @@ if not opts.signifFrame:
   
 
   #then filter out the events into only those with the phase space we are interested in
-  trainTotal = trainTotal[trainTotal.dipho_mass>100.]
-  trainTotal = trainTotal[trainTotal.dipho_mass<180.]
-  print 'done mass cuts'
 
   cutFlow2017.write('Following mass cuts, we have: ')
   afterMassCut = opts.intLumi*np.sum(trainTotal['weight'].values)
@@ -219,31 +188,17 @@ if not opts.signifFrame:
   effRemovedByCut = (totEvents - afterMassCut)/totEvents
   cutFlow2017.write('So cut removed: %.3f of total events \n' %(effRemovedByCut)) 
 
-  #some extra cuts that are applied for diphoton BDT in the AN
-  trainTotal = trainTotal[trainTotal.dipho_leadIDMVA>-0.9]
-  trainTotal = trainTotal[trainTotal.dipho_subleadIDMVA>-0.9]
-  trainTotal = trainTotal[trainTotal.dipho_lead_ptoM>0.333]
-  trainTotal = trainTotal[trainTotal.dipho_sublead_ptoM>0.25]
-  trainTotal = trainTotal[trainTotal.dijet_Mjj<350]
-  print 'done basic preselection cuts'
-
-
   #FIXME below is temporarily replaced
   #read in signal mc dataframe
   #trainTotal = pd.read_pickle('%s/trainTotal.pkl'%frameDir)
   #trainTotal = pd.read_pickle('%s/jetTotal.pkl'%frameDir)
   #print 'Successfully loaded the signal dataframe'
-  
-  #remove bkg then add reco tag info
-  #trainTotal = trainTotal[trainTotal.stage1cat>0.01]
-  #trainTotal = trainTotal[trainTotal.stage1cat<12.]
-  #trainTotal = trainTotal[trainTotal.stage1cat!=1]
-  #trainTotal = trainTotal[trainTotal.stage1cat!=2]
 
   print 'About to add reco tag info'
   trainTotal['diphopt'] = trainTotal.apply(addPt, axis=1)
   trainTotal['reco'] = trainTotal.apply(reco, axis=1)
-  trainTotal['truthDipho'] = trainTotal.apply(truthDipho, axis=1)
+  trainTotal['truthDipho'] = trainTotal.apply(truthDipho, axis=1, args=[signals])
+  #trainTotal['truthClass'] = trainTotal.apply(truthClass, axis=1)
   trainTotal['truthClass'] = trainTotal.apply(truthClass1p2, axis=1)
   print 'Successfully added reco tag info'
 
@@ -265,14 +220,20 @@ if not opts.signifFrame:
   cutFlow2017.close()
 
   #save
-  #if not path.isdir(frameDir): 
-  #  system('mkdir -p %s'%frameDir)
-  #trainTotal.to_pickle('%s/signifTotal.pkl'%frameDir)
-  #print 'frame saved as %s/signifTotal.pkl'%frameDir
+  if not path.isdir(frameDir): 
+    system('mkdir -p %s'%frameDir)
+  trainTotal.to_hdf('%s/signifTotal.h5'%frameDir, key='df', mode='w', format='table')
+  print 'frame saved as %s/signifTotal.h5'%frameDir
+
 
 else:
   #read in already cleaned up signal frame
-  trainTotal = pd.read_pickle('%s/%s'%(frameDir,opts.signifFrame))
+  trainTotal = pd.read_hdf('%s/%s'%(frameDir,opts.signifFrame), 'df')
+
+trainTotal['weight'] = trainTotal.apply(applyLumiScale, axis=1, args=[yearToLumi])
+
+print('TrainTotal:')
+print(trainTotal['weight'].head(30))
 
 #define the variables used as input to the classifier
 diphoX  = trainTotal[diphoVars].values
@@ -281,7 +242,7 @@ if opts.className:
   if 'Jet' in opts.className:
     diphoI  = trainTotal[jetVars].values
   if 'Class' in opts.className:
-    diphoI  = trainTotal[allVars].values
+    diphoI  = trainTotal[jetVars+diphoVars+['diphopt']].values
 diphoJ  = trainTotal['truthClass'].values
 diphoFW = trainTotal['weight'].values
 diphoP  = trainTotal['diphopt'].values
@@ -293,7 +254,7 @@ if opts.className:
   if 'Jet' in opts.className:
     dataI  = dataTotal[jetVars].values
   if 'Class' in opts.className:
-    dataI  = dataTotal[allVars].values
+    dataI  = dataTotal[jetVars+diphoVars+['diphopt']].values
 dataY  = np.zeros(dataX.shape[0])
 dataFW = np.ones(dataX.shape[0])
 dataP  = dataTotal['diphopt'].values
@@ -311,6 +272,9 @@ diphoModel.load_model('%s/%s'%(modelDir,opts.modelName))
 #get predicted values
 diphoPredY = diphoModel.predict(diphoMatrix)
 dataPredY  = diphoModel.predict(dataMatrix)
+
+print('Reco accuracy score is:')
+print(accuracy_score(diphoJ, diphoR, sample_weight=diphoFW))
 
 #load the class model to be tested, if it exists
 if opts.className:
@@ -343,99 +307,82 @@ if opts.className:
     dataR = predFrame['predClass'].values
 
   elif 'nClasses' in opts.className:
-    classMatrix = xg.DMatrix(diphoI, label=diphoY, weight=diphoFW, feature_names=allVars)
-    predProbClass = classModel.predict(classMatrix).reshape(diphoX.shape[0],nClasses)
+    classMatrix = xg.DMatrix(diphoI, label=diphoY, weight=diphoFW, feature_names=jetVars+diphoVars+['diphopt'])
+    predProbClass = classModel.predict(classMatrix).reshape(diphoI.shape[0],nClasses)
     #For equal weights only:
     #predProbClass *= procPriors
+    
     diphoR = np.argmax(predProbClass, axis=1)
+    diphoResults = pd.concat([pd.DataFrame(diphoR),pd.DataFrame(diphoP), pd.DataFrame(diphoJ), pd.DataFrame(diphoFW)], axis=1)
+    diphoResults.columns = ['diphoR','diphoP', 'diphoJ', 'diphoFW']
+    diphoResults['diphoR'] = diphoResults.apply(ptSplits, axis=1)
+    diphoR = diphoResults['diphoR'].values
+    diphoFW = diphoResults['diphoFW']
     print('nClasses BDT accuracy score:')
     print(accuracy_score(diphoJ, diphoR, sample_weight=diphoFW))
-    dfForDiphoBDTPurityMatrices = pd.concat([pd.DataFrame(diphoR), pd.DataFrame(diphoJ), pd.DataFrame(diphoFW), pd.DataFrame(diphoPredY)], axis=1)
-    dfForDiphoBDTPurityMatrices.to_pickle('/vols/build/cms/jwd18/NewTwoStep/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/picklesForPurity/nClassBDT_MCW.pkl')
- 
+    print('dipho results')
+    print(diphoResults.head(50))
+    
     #same thing for background (no need to save for purits matrices though)
-    classDataMatrix = xg.DMatrix(dataI, label=dataY, weight=dataFW, feature_names=allVars)
-    predProbClass = classModel.predict(classDataMatrix).reshape(dataX.shape[0],nClasses)
+    classDataMatrix = xg.DMatrix(dataI, label=dataY, weight=dataFW, feature_names=jetVars+diphoVars+['diphopt'])
+    predProbClass = classModel.predict(classDataMatrix).reshape(dataI.shape[0],nClasses)
     #predProbClass *= procPriors
     dataR = np.argmax(predProbClass, axis=1)
+    dataResults = pd.concat([pd.DataFrame(dataR), pd.DataFrame(dataP)], axis=1)
+    dataResults.columns = ['diphoR','diphoP']
+    dataResults['diphoR'] = diphoResults.apply(ptSplits, axis=1)
+    dataR = dataResults['diphoR'].values
 
   else:
     raise Exception("your class model type is not yet supported, sorry")
+
 
 #now estimate two-class significance
 #set up parameters for the optimiser
 ranges = [ [0.5,1.] ]
 names  = ['DiphotonBDT']
 printStr = ''
-binsRequiringThree = [4]
-binsRequiringFour = [4]
-binsRequiringFive = [4]
-binsRequiringSix = [4]
+binsRequiringThree = [0,1,2,3,4,5,6,7]
+binsRequiringTwo = [8,9,10,11]
 
 plotDir  = '%s/%s/Proc_0'%(plotDir,opts.modelName.replace('.model',''))
 if not path.isdir(plotDir): 
-  system('mkdir -p %s'%plotDir)
+    system('mkdir -p %s'%plotDir)
 
 
+for iClass in binsRequiringThree:
+    if (iClass not in binsRequiringTwo):
+        sigWeights = diphoFW * (diphoJ==iClass) * (diphoR==iClass)
+        bkgWeights = dataFW * (dataR==iClass)
+        optimiser = CatOptim(sigWeights, diphoM, [diphoPredY], bkgWeights, dataM, [dataPredY], 3, ranges, names)
+        #optimiser.setTransform(True)
+        optimiser.setConstBkg(True)
+        optimiser.optimise(1, opts.nIterations)
+        plotDir  = plotDir.replace('Proc_%g'%(iClass-1),'Proc_%g'%iClass)
+        if not path.isdir(plotDir): 
+            system('mkdir -p %s'%plotDir)
+        #optimiser.crossCheck(opts.intLumi,plotDir)
+        printStr += 'Results for bin %g : \n'%iClass
+        printStr += optimiser.getPrintableResult()
 
-for iClass in range(nClasses):
-  #if (iClass not in binsRequiringThree) and (iClass not in binsRequiringFour):
-    sigWeights = diphoFW * (diphoJ==iClass) * (diphoR==iClass)
+for iClass in binsRequiringTwo:
+    sigWeights = diphoFW * (diphoJ==iClass) * (diphoR==iClass) 
     bkgWeights = dataFW * (dataR==iClass)
     optimiser = CatOptim(sigWeights, diphoM, [diphoPredY], bkgWeights, dataM, [dataPredY], 2, ranges, names)
     #optimiser.setTransform(True)
-    optimiser.optimise(opts.intLumi, opts.nIterations)
-    plotDir  = plotDir.replace('Proc_%g'%(iClass-1),'Proc_%g'%iClass)
-    if not path.isdir(plotDir): 
-      system('mkdir -p %s'%plotDir)
-    #optimiser.crossCheck(opts.intLumi,plotDir)
+    optimiser.setConstBkg(True)
+    optimiser.optimise(1, opts.nIterations)
     printStr += 'Results for bin %g : \n'%iClass
     printStr += optimiser.getPrintableResult()
 
-'''
-#FIXME: now just running indiv categories by themselves for speed
-for iClass in binsRequiringThree:
-  sigWeights = diphoFW * (diphoJ==iClass) * (diphoR==iClass)
-  bkgWeights = dataFW * (dataR==iClass)
-  optimiser = CatOptim(sigWeights, diphoM, [diphoPredY], bkgWeights, dataM, [dataPredY], 3, ranges, names)
-  #optimiser.setTransform(True)
-  optimiser.optimise(opts.intLumi, opts.nIterations)
-  printStr += 'Results for bin %g : \n'%iClass
-  printStr += optimiser.getPrintableResult()
 
-for iClass in binsRequiringFour:
-  sigWeights = diphoFW * (diphoJ==iClass) * (diphoR==iClass)
-  bkgWeights = dataFW * (dataR==iClass)
-  optimiser = CatOptim(sigWeights, diphoM, [diphoPredY], bkgWeights, dataM, [dataPredY], 4, ranges, names)
-  #optimiser.setTransform(True)
-  optimiser.optimise(opts.intLumi, opts.nIterations)
-  printStr += 'Results for bin %g : \n'%iClass
-  printStr += optimiser.getPrintableResult()
 
-for iClass in binsRequiringFive:
-  sigWeights = diphoFW * (diphoJ==iClass) * (diphoR==iClass)
-  bkgWeights = dataFW * (dataR==iClass)
-  optimiser = CatOptim(sigWeights, diphoM, [diphoPredY], bkgWeights, dataM, [dataPredY], 5, ranges, names)
-  #optimiser.setTransform(True)
-  optimiser.optimise(opts.intLumi, opts.nIterations)
-  printStr += 'Results for bin %g : \n'%iClass
-  printStr += optimiser.getPrintableResult()
-
-for iClass in binsRequiringSix:
-  sigWeights = diphoFW * (diphoJ==iClass) * (diphoR==iClass)
-  bkgWeights = dataFW * (dataR==iClass)
-  optimiser = CatOptim(sigWeights, diphoM, [diphoPredY], bkgWeights, dataM, [dataPredY], 6, ranges, names)
-  #optimiser.setTransform(True)
-  optimiser.optimise(opts.intLumi, opts.nIterations)
-  printStr += 'Results for bin %g : \n'%iClass
-  printStr += optimiser.getPrintableResult()
-'''
 
 print
 print printStr
 
                                               ### plotting ###
-
+'''
 #declare 2D hists
 nBinsX=nClasses+1 #include the ggh VBF-like procs                                                                   
 nBinsY=nClasses 
@@ -727,3 +674,4 @@ ax.fill(angles, values, 'r', alpha=0.1)
 plt.legend(loc='upper right', bbox_to_anchor=(0.14, 0.04))
 plt.show()
 plt.savefig('/vols/build/cms/jwd18/NewTwoStep/CMSSW_10_2_0/src/Stage1categorisation/TwoStep/MultiClassifierPlots/nClassBDT_MCW_effRadarPlot.pdf')
+'''

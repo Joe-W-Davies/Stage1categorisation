@@ -309,7 +309,7 @@ models    = ['altDiphoModel_NewModel.model']
 #paramSets = [None,'max_depth:3','max_depth:4','max_depth:5','max_depth:10','eta:0.1','eta:0.5','lambda:0']
 paramSets = [None]
 classModel = None
-#classModel = 'nClassesModelMCW_Combined_.model' #combined
+classModel = 'nClassesModelMCW_Combined_.model' #combined
 #classModel = 'nClassesModelMCW___min_child_weight_6__subsample_0.845330__eta_0.68__colsample_bytree_0.99__max_depth_13__gamma_0.41__lambda_1.458330.model'#best nClass model trained with MC weights
 #classModel = 'nJetModel_MCW___min_child_weight_10__subsample_0.949832__eta_0.76__colsample_bytree_0.95__max_depth_12__gamma_0.51__lambda_0.777625.model' #best nJet model trained with MC weights
 #classModel = 'nClassesModelEQW___min_child_weight_2__subsample_0.96__eta_0.68__colsample_bytree_0.86__max_depth_9__gamma_0.02__lambda_0.494380.model' #best nlass model trained with EQ weights (doesnt exist rn)
@@ -330,9 +330,9 @@ for params in paramSets:
   models.append(name.replace('dipho','altDipho'))
 paramSets = None
 dataFrame = 'dataTotal.h5'
-#dataFrame = None
+dataFrame = None
 sigFrame  = 'signifTotal.h5'
-#sigFrame  = None
+sigFrame  = None
 
 
 '''

@@ -28,7 +28,7 @@ parser.add_option('-d','--dataFrame', default=None, help='Name of dataframe if i
 parser.add_option('-s','--signifFrame', default=None, help='Name of cleaned signal dataframe if it already exists')
 parser.add_option('-m','--modelName', default=None, help='Name of model for testing')
 parser.add_option('-c','--className', default=None, help='Name of multi-class model used to build categories. If None, use reco categories')
-parser.add_option('-n','--nIterations', default=1, help='Number of iterations to run for random significance optimisation')
+parser.add_option('-n','--nIterations', default=10, help='Number of iterations to run for random significance optimisation')
 parser.add_option('--intLumi',type='float', default=35.9, help='Integrated luminosity')
 (opts,args)=parser.parse_args()
 
@@ -86,8 +86,8 @@ allVars   = ['n_jet_30','dijet_Mjj',
 queryString = '(dipho_mass>100.) and (dipho_mass<180.) and (dipho_leadIDMVA>-0.9) and (dipho_subleadIDMVA>-0.9) and (dipho_lead_ptoM>0.333) and (dipho_sublead_ptoM>0.25) and (dijet_Mjj<350.)'
 
 #m,procFileMap = {'Data':'Data_jetInfo.root'} 
-procFileMap = {'Data':'Data_2016.root','Data':'Data_2017.root','Data':'Data_2018.root'}
-#procFileMap = {'Data':'Data_combined.root'} 
+#procFileMap = {'Data':'Data_2016.root','Data':'Data_2017.root','Data':'Data_2018.root'}
+procFileMap = {'Data':'Data_combined.root'} 
 theProcs = procFileMap.keys()
 
 #either get existing data frame or create it
@@ -153,14 +153,14 @@ print(dataTotal['weight'].head(30))
 
 if not opts.signifFrame:
   #sigFileMap = {'ggh':'ggH_amc_jetinfo.root'}
-  sigFileMap = {'ggh':'ggh_amc_withBinaryYear_2016.root', 'ggh':'ggh_amc_withBinaryYear_2017.root', 'ggh':'ggh_amc_withBinaryYear_2018.root'} 
-  #sigFileMap = {'ggh':'ggH_amc_combined.root'} 
+  #sigFileMap = {'ggh':'ggh_amc_withBinaryYear_2016.root', 'ggh':'ggh_amc_withBinaryYear_2017.root', 'ggh':'ggh_amc_withBinaryYear_2018.root'} 
+  sigFileMap = {'ggh':'ggH_amc_combined.root'} 
   trainFrames = {}
   #get the trees, turn them into arrays
   for proc,fn in sigFileMap.iteritems():
       trainFile = upr.open('%s/%s'%(trainDir,fn)) 
-      #if proc in signals: trainTree = trainFile['%s_125_13TeV_GeneralDipho'%proc]
-      if proc in signals: trainTree = trainFile['vbfTagDumper/trees/%s_125_13TeV_GeneralDipho'%proc]
+      if proc in signals: trainTree = trainFile['%s_125_13TeV_GeneralDipho'%proc]
+      #if proc in signals: trainTree = trainFile['vbfTagDumper/trees/%s_125_13TeV_GeneralDipho'%proc]
       else: raise Exception('Error did not recognise process %s !'%proc)
       trainFrames[proc] = trainTree.pandas.df(allVars+years).query(queryString)
       trainFrames[proc]['proc'] = proc
@@ -345,18 +345,18 @@ printStr = ''
 binsRequiringThree = [0,1,2,3,4,5,6,7]
 binsRequiringTwo = [8,9,10,11]
 
+
 plotDir  = '%s/%s/Proc_0'%(plotDir,opts.modelName.replace('.model',''))
 if not path.isdir(plotDir): 
     system('mkdir -p %s'%plotDir)
 
-
 for iClass in binsRequiringThree:
-    if (iClass not in binsRequiringTwo):
+    #if (iClass not in binsRequiringTwo):
         sigWeights = diphoFW * (diphoJ==iClass) * (diphoR==iClass)
         bkgWeights = dataFW * (dataR==iClass)
         optimiser = CatOptim(sigWeights, diphoM, [diphoPredY], bkgWeights, dataM, [dataPredY], 3, ranges, names)
         #optimiser.setTransform(True)
-        optimiser.setConstBkg(True)
+        #optimiser.setConstBkg(True)
         optimiser.optimise(1, opts.nIterations)
         plotDir  = plotDir.replace('Proc_%g'%(iClass-1),'Proc_%g'%iClass)
         if not path.isdir(plotDir): 
@@ -365,15 +365,17 @@ for iClass in binsRequiringThree:
         printStr += 'Results for bin %g : \n'%iClass
         printStr += optimiser.getPrintableResult()
 
+
 for iClass in binsRequiringTwo:
     sigWeights = diphoFW * (diphoJ==iClass) * (diphoR==iClass) 
     bkgWeights = dataFW * (dataR==iClass)
     optimiser = CatOptim(sigWeights, diphoM, [diphoPredY], bkgWeights, dataM, [dataPredY], 2, ranges, names)
     #optimiser.setTransform(True)
-    optimiser.setConstBkg(True)
+    #optimiser.setConstBkg(True)
     optimiser.optimise(1, opts.nIterations)
     printStr += 'Results for bin %g : \n'%iClass
     printStr += optimiser.getPrintableResult()
+
 
 
 

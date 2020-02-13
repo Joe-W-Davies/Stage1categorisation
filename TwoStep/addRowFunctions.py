@@ -92,16 +92,13 @@ def vbfWeight(row, vbfSumW, gghSumW, bkgSumW):
 
 
 def applyLumiScale(row, yearToLumi):
-    weight = abs(row['weight'])
-    for year,lumi in yearToLumi.iteritems():
-        if row['year_2016']==1:
-            return weight*yearToLumi['2016']
-            break
-        elif row['year_2017']==1:
-            return weight*yearToLumi['2017']
-            break
-        elif row['year_2018']==1:
-            return weight*yearToLumi['2017']
+    weight = row['weight']
+    if row['year_2016']==1:
+        return weight*yearToLumi['2016']
+    elif row['year_2017']==1:
+        return weight*yearToLumi['2017']
+    elif row['year_2018']==1:
+        return weight*yearToLumi['2018']
             
       
 def ptSplits(row):
